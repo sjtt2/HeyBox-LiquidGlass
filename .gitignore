@@ -1,0 +1,17 @@
+# build outputs
+build/
+
+# signing material — never commit keys
+debug.keystore
+*.jks
+*.keystore
+
+# ide
+.idea/
+.vscode/
+*.iml
+
+# local artifacts
+*.apk
+*.aab
+local.properties
