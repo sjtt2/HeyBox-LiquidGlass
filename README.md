@@ -1,13 +1,10 @@
+![HeyBox-LiquidGlass](https://socialify.git.ci/sjtt2/HeyBox-LiquidGlass/image?custom_description=%E4%B8%BA%E5%B0%8F%E9%BB%91%E7%9B%92+App+%E6%89%93%E9%80%A0%E7%9A%84+iOS+26+%E9%A3%8E%E6%A0%BC%E6%B6%B2%E6%80%81%E7%8E%BB%E7%92%83%E5%BA%95%E9%83%A8%E5%AF%BC%E8%88%AA%E6%A0%8F+%C2%B7+LSPosed+%E6%A8%A1%E5%9D%97%EF%BC%88libxposed+API+102%EF%BC%89&description=1&font=JetBrains+Mono&forks=1&issues=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fsjtt2%2FHeyBox-LiquidGlass%2Fff221e1f7b233823ce6dfcee8e1af3c52efe1afe%2Fres%2Fmipmap-xxxhdpi%2Fic_launcher.png&name=1&owner=1&pattern=Plus&pulls=1&stargazers=1&theme=Auto)
 # 小黑盒液态玻璃 HeyBox-LiquidGlass
 
 [![API](https://img.shields.io/badge/libxposed-API%20102-brightgreen)](https://github.com/libxposed/api)
 [![Platform](https://img.shields.io/badge/platform-Android%2013%2B-green)](https://developer.android.com)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-为小黑盒（`com.max.xiaoheihe`）打造的 **iOS 26 风格液态玻璃底部导航栏** · LSPosed 模块。
-
-> iOS 26 Liquid Glass bottom navigation for the HeyBox app — real-time SDF refraction,
-> chromatic dispersion and a glass-droplet selection indicator, as an LSPosed module.
 
 ## ✨ 特性
 
