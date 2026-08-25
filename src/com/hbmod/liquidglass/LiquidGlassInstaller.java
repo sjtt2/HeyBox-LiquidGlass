@@ -497,6 +497,16 @@ final class LiquidGlassInstaller {
                             }
                         }
                     });
+            // the bar may ALREADY be attached (host was laid out first),
+            // so the listener above would never fire - start directly
+            if (tabBar.isAttachedToWindow()) {
+                try {
+                    meter.start();
+                    HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
+                            "backdrop meter started (already attached)");
+                } catch (Throwable ignored) {
+                }
+            }
 
             // hide the original radio row visually (keeps state mechanics alive)
             bar.setVisibility(View.INVISIBLE);
@@ -759,12 +769,13 @@ final class LiquidGlassInstaller {
                     Object thiz = chain.getThisObject();
                     if (thiz instanceof View) {
                         // BODY follows the app theme (uiMode), NOT the backdrop
+                        // dark mode -> black smoked base / light -> white frosted
                         int mode = ((View) thiz).getResources()
                                 .getConfiguration().uiMode
                                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
                         boolean light =
                                 mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                        tint = light ? 0xA2FFFFFF : 0x30FFFFFF;
+                        tint = light ? 0xA2FFFFFF : 0xB3000000;
                     }
                 } catch (Throwable ignored) {
                 }
