@@ -267,7 +267,7 @@ final class LiquidGlassInstaller {
     /**
      * QWEA0/Liquid-Glass-Android renderer: FrameLayout subclass, GPU lens
      * pipeline (SDF refraction + dispersion + sensor specular + adaptive tint).
-     * Samples backdropSource directly via RenderNode recording — no bitmaps.
+     * Samples backdropSource directly via RenderNode recording 鈥?no bitmaps.
      */
     private static void attachQwea0Renderer(Activity activity, ViewGroup host,
                                             ViewGroup content, int barHeightSpec) {
@@ -353,10 +353,11 @@ final class LiquidGlassInstaller {
             tabBar.setBevelWidth(16f * density);
             tabBar.setDispersionStrength(0.12f);
             tabBar.setEnableSensorHighlight(true);
-            // Runtime backdrop-luminance adaptation ON: drives icon/label colors
-            // (chrome) per backdrop brightness. The glass BODY tint is decoupled
-            // from it via installTintOverride() below.
-            tabBar.setEnableAdaptiveTint(true);
+            // Per-pixel adaptive tint OFF: it counter-tints the glass body
+            // (dark on bright backdrops) and bypasses our hook. The body is
+            // themed via the currentTintColor override instead; label colors
+            // are driven by OUR standalone BackdropLuminanceMeter below.
+            tabBar.setEnableAdaptiveTint(false);
             installTintOverride();
 
             // bar -> app: forward taps to the hidden radio buttons
@@ -441,6 +442,62 @@ final class LiquidGlassInstaller {
             host.addView(gapGuard, host.getChildCount());
             positionGapGuard(host, tabBar, gapGuard);
 
+            // Label colors follow the REAL backdrop via a standalone luminance
+            // meter (library's own class, decoupled from its view pipeline).
+            final java.util.concurrent.atomic.AtomicReference<
+                    com.example.liquidglass.BackdropLuminanceMeter> meterHolder =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            com.example.liquidglass.BackdropLuminanceMeter meter =
+                    new com.example.liquidglass.BackdropLuminanceMeter(tabBar,
+                            new kotlin.jvm.functions.Function1<Float, kotlin.Unit>() {
+                                @Override
+                                public kotlin.Unit invoke(Float luma) {
+                                    sDbgLastLuma = luma == null ? 0f : luma;
+                                    try {
+                                        com.example.liquidglass.BackdropLuminanceMeter
+                                                m0 = meterHolder.get();
+                                        boolean overLight =
+                                                m0 != null && m0.isOverLight();
+                                        if (overLight != sChromeLight) {
+                                            sChromeLight = overLight;
+                                            final boolean flip = overLight;
+                                            tabBar.post(() -> {
+                                                try {
+                                                    applyTabBarOverLight(tabBar,
+                                                            !flip);
+                                                    HeyBoxLiquidGlassModule.log(
+                                                            android.util.Log.INFO,
+                                                            "backdrop flip: overLight="
+                                                                    + flip);
+                                                } catch (Throwable ignored) {
+                                                }
+                                            });
+                                        }
+                                    } catch (Throwable ignored) {
+                                    }
+                                    return kotlin.Unit.INSTANCE;
+                                }
+                            });
+            meterHolder.set(meter);
+            tabBar.addOnAttachStateChangeListener(
+                    new View.OnAttachStateChangeListener() {
+                        @Override
+                        public void onViewAttachedToWindow(View v) {
+                            try {
+                                meter.start();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+
+                        @Override
+                        public void onViewDetachedFromWindow(View v) {
+                            try {
+                                meter.stop();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+
             // hide the original radio row visually (keeps state mechanics alive)
             bar.setVisibility(View.INVISIBLE);
 
@@ -467,6 +524,10 @@ final class LiquidGlassInstaller {
             HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
                     "renderer=QWEA0 LiquidGlassTabBar (glass droplet selection)");
             sTabBarActive = true;
+            if (tabBar instanceof com.example.liquidglass.LiquidGlassView) {
+                DebugOverlay.install(activity, host,
+                        (com.example.liquidglass.LiquidGlassView) tabBar);
+            }
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("qwea0 tabbar unavailable", t);
         }
@@ -651,6 +712,31 @@ final class LiquidGlassInstaller {
     /** Installed once per process: theme-driven glass body tint. */
     private static volatile boolean sTintHookInstalled;
     private static volatile boolean sLastMaterialLight;
+    private static volatile int sDbgTintCalls;
+    private static volatile int sDbgLumWrites;
+    private static volatile int sDbgLastTint;
+    private static volatile float sDbgLastLuma;
+    private static volatile boolean sChromeLight;
+
+    static int dbgTintCalls() {
+        return sDbgTintCalls;
+    }
+
+    static int dbgLumWrites() {
+        return sDbgLumWrites;
+    }
+
+    static int dbgLastTint() {
+        return sDbgLastTint;
+    }
+
+    static boolean dbgMatLight() {
+        return sLastMaterialLight;
+    }
+
+    static float dbgLastLuma() {
+        return sDbgLastLuma;
+    }
 
     /**
      * Overrides the renderer's currentTintColor() so the glass BODY follows the
@@ -665,79 +751,32 @@ final class LiquidGlassInstaller {
         }
         sTintHookInstalled = true;
         try {
-            java.lang.reflect.Method ols =
-                    com.example.liquidglass.LiquidGlassView.class
-                            .getDeclaredMethod("onLuminanceSample", float.class);
-            HeyBoxLiquidGlassModule.hookExecutable(ols, chain -> {
-                Object result = chain.proceed();
-                try {
-                    Object thiz = chain.getThisObject();
-                    if (thiz instanceof com.example.liquidglass.LiquidGlassView) {
-                        com.example.liquidglass.LiquidGlassView view =
-                                (com.example.liquidglass.LiquidGlassView) thiz;
-                        boolean light = view.isOverLightBackground();
-                        writeThemeTint(view, light);
-                        mutateMaterialForTheme(light);
-                    }
-                } catch (Throwable ignored) {
-                }
-                return result;
-            });
-            HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
-                    "luminance-sample tint override hooked");
-        } catch (Throwable t) {
-            HeyBoxLiquidGlassModule.logErr("luminance hook failed", t);
-        }
-        try {
             java.lang.reflect.Method m = com.example.liquidglass.LiquidGlassView.class
                     .getDeclaredMethod("currentTintColor");
             HeyBoxLiquidGlassModule.hookExecutable(m, chain -> {
                 int tint = 0x24FFFFFF;
                 try {
                     Object thiz = chain.getThisObject();
-                    if (thiz instanceof com.example.liquidglass.LiquidGlassView) {
+                    if (thiz instanceof View) {
+                        // BODY follows the app theme (uiMode), NOT the backdrop
+                        int mode = ((View) thiz).getResources()
+                                .getConfiguration().uiMode
+                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
                         boolean light =
-                                ((com.example.liquidglass.LiquidGlassView) thiz)
-                                        .isOverLightBackground();
+                                mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
                         tint = light ? 0xA2FFFFFF : 0x30FFFFFF;
                     }
                 } catch (Throwable ignored) {
                 }
+                sDbgTintCalls++;
+                sDbgLastTint = tint;
                 return tint;
             });
             HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
-                    "currentTintColor override hooked");
+                    "currentTintColor override hooked (theme body)");
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("currentTintColor hook failed", t);
         }
-    }
-
-    private static void writeThemeTint(Object view, boolean light) throws Exception {
-        int tint = light ? 0xA2FFFFFF : 0x30FFFFFF;
-        java.lang.reflect.Field af = com.example.liquidglass.LiquidGlassView.class
-                .getDeclaredField("adaptiveTintColor");
-        af.setAccessible(true);
-        af.setInt(view, tint);
-        try {
-            java.lang.reflect.Field lf = com.example.liquidglass.LiquidGlassView.class
-                    .getDeclaredField("lastAppliedTint");
-            lf.setAccessible(true);
-            lf.setInt(view, tint);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void mutateMaterialForTheme(boolean light) throws Exception {
-        if (light == sLastMaterialLight) {
-            return;
-        }
-        sLastMaterialLight = light;
-        java.lang.reflect.Field sf = com.example.liquidglass.GlassMaterial.class
-                .getDeclaredField("innerShadow");
-        sf.setAccessible(true);
-        // lighter rim on bright backdrops, original depth on dark ones
-        sf.setFloat(com.example.liquidglass.GlassMaterial.REGULAR,
-                light ? 0.25f : 0.55f);
     }
 
     private static void applyQmParams(com.qmdeve.liquidglass.Config cfg,
