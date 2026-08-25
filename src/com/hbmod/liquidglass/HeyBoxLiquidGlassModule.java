@@ -25,9 +25,13 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
 
     private static volatile HeyBoxLiquidGlassModule sSelf;
 
+    /** Chain-to-value function allowed to throw; failures fall back to proceed(). */
+    interface ChainFunction {
+        Object apply(XposedInterface.Chain chain) throws Throwable;
+    }
+
     /** Hooks an executable with a replacement-value function (protective mode). */
-    static void hookExecutable(java.lang.reflect.Executable ex,
-                               java.util.function.Function<XposedInterface.Chain, Object> fn) {
+    static void hookExecutable(java.lang.reflect.Executable ex, ChainFunction fn) {
         HeyBoxLiquidGlassModule self = sSelf;
         if (self == null) {
             throw new IllegalStateException("module instance not attached yet");

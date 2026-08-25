@@ -650,6 +650,7 @@ final class LiquidGlassInstaller {
 
     /** Installed once per process: theme-driven glass body tint. */
     private static volatile boolean sTintHookInstalled;
+    private static volatile boolean sLastMaterialLight;
 
     /**
      * Overrides the renderer's currentTintColor() so the glass BODY follows the
@@ -664,6 +665,30 @@ final class LiquidGlassInstaller {
         }
         sTintHookInstalled = true;
         try {
+            java.lang.reflect.Method ols =
+                    com.example.liquidglass.LiquidGlassView.class
+                            .getDeclaredMethod("onLuminanceSample", float.class);
+            HeyBoxLiquidGlassModule.hookExecutable(ols, chain -> {
+                Object result = chain.proceed();
+                try {
+                    Object thiz = chain.getThisObject();
+                    if (thiz instanceof com.example.liquidglass.LiquidGlassView) {
+                        com.example.liquidglass.LiquidGlassView view =
+                                (com.example.liquidglass.LiquidGlassView) thiz;
+                        boolean light = view.isOverLightBackground();
+                        writeThemeTint(view, light);
+                        mutateMaterialForTheme(light);
+                    }
+                } catch (Throwable ignored) {
+                }
+                return result;
+            });
+            HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
+                    "luminance-sample tint override hooked");
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("luminance hook failed", t);
+        }
+        try {
             java.lang.reflect.Method m = com.example.liquidglass.LiquidGlassView.class
                     .getDeclaredMethod("currentTintColor");
             HeyBoxLiquidGlassModule.hookExecutable(m, chain -> {
@@ -671,23 +696,48 @@ final class LiquidGlassInstaller {
                 try {
                     Object thiz = chain.getThisObject();
                     if (thiz instanceof com.example.liquidglass.LiquidGlassView) {
-                        // Measure reality, not flags: the library's luminance
-                        // meter samples actual pixels behind the glass each
-                        // frame — the same signal that flips label colors.
-                        boolean overLight =
+                        boolean light =
                                 ((com.example.liquidglass.LiquidGlassView) thiz)
                                         .isOverLightBackground();
-                        tint = overLight ? 0xA2FFFFFF : 0x30FFFFFF;
+                        tint = light ? 0xA2FFFFFF : 0x30FFFFFF;
                     }
                 } catch (Throwable ignored) {
                 }
                 return tint;
             });
             HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
-                    "glass tint override hooked (theme-driven body)");
+                    "currentTintColor override hooked");
         } catch (Throwable t) {
-            HeyBoxLiquidGlassModule.logErr("tint override hook failed", t);
+            HeyBoxLiquidGlassModule.logErr("currentTintColor hook failed", t);
         }
+    }
+
+    private static void writeThemeTint(Object view, boolean light) throws Exception {
+        int tint = light ? 0xA2FFFFFF : 0x30FFFFFF;
+        java.lang.reflect.Field af = com.example.liquidglass.LiquidGlassView.class
+                .getDeclaredField("adaptiveTintColor");
+        af.setAccessible(true);
+        af.setInt(view, tint);
+        try {
+            java.lang.reflect.Field lf = com.example.liquidglass.LiquidGlassView.class
+                    .getDeclaredField("lastAppliedTint");
+            lf.setAccessible(true);
+            lf.setInt(view, tint);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void mutateMaterialForTheme(boolean light) throws Exception {
+        if (light == sLastMaterialLight) {
+            return;
+        }
+        sLastMaterialLight = light;
+        java.lang.reflect.Field sf = com.example.liquidglass.GlassMaterial.class
+                .getDeclaredField("innerShadow");
+        sf.setAccessible(true);
+        // lighter rim on bright backdrops, original depth on dark ones
+        sf.setFloat(com.example.liquidglass.GlassMaterial.REGULAR,
+                light ? 0.25f : 0.55f);
     }
 
     private static void applyQmParams(com.qmdeve.liquidglass.Config cfg,
