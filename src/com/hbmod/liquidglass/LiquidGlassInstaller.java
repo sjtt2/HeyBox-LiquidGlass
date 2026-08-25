@@ -271,6 +271,41 @@ final class LiquidGlassInstaller {
      * pipeline (SDF refraction + dispersion + sensor specular + adaptive tint).
      * Samples backdropSource directly via RenderNode recording 鈥?no bitmaps.
      */
+    static void injectSettingsRow(Activity activity) {
+        try {
+            GlassConfig.load(activity);
+            SettingsInjector.inject(activity);
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("injectSettingsRow failed", t);
+        }
+    }
+
+    /** Re-applies current config to the live glass views (settings dialog). */
+    static void refreshGlass() {
+        try {
+            View bar = sTabBarRef.get();
+            if (bar instanceof ViewGroup) {
+                bar.invalidate();
+                View droplet = findDroplet((ViewGroup) bar);
+                if (droplet != null) {
+                    droplet.invalidate();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static View findDroplet(ViewGroup tabBar) {
+        for (int i = 0; i < tabBar.getChildCount(); i++) {
+            View c = tabBar.getChildAt(i);
+            if (c instanceof com.example.liquidglass.LiquidGlassView
+                    && !(c instanceof com.example.liquidglass.LiquidGlassTabBar)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
     private static void attachQwea0Renderer(Activity activity, ViewGroup host,
                                             ViewGroup content, int barHeightSpec) {
         try {
@@ -314,6 +349,7 @@ final class LiquidGlassInstaller {
                                           ViewGroup content, int barHeightSpec,
                                           int navPad) {
         try {
+            GlassConfig.load(activity);
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
             sTabBarRef = new java.lang.ref.WeakReference<>(tabBar);
@@ -442,6 +478,13 @@ final class LiquidGlassInstaller {
             // swallow stray taps landing in the center gap
             final View gapGuard = new View(activity);
             gapGuard.setClickable(true);
+            gapGuard.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    SettingsDialog.show(activity);
+                    return true;
+                }
+            });
             host.addView(gapGuard, host.getChildCount());
             positionGapGuard(host, tabBar, gapGuard);
 
@@ -457,6 +500,28 @@ final class LiquidGlassInstaller {
                                 public kotlin.Unit invoke(Float luma) {
                                     sDbgLastLuma = luma == null ? 0f : luma;
                                     try {
+                                        if (!GlassConfig.adaptiveChrome) {
+                                            // user disabled backdrop flipping:
+                                            // pin labels to the app theme
+                                            boolean uiDark = tabBar.getResources()
+                                                    .getConfiguration().uiMode
+                                                    % 2 == 1;
+                                            if (sChromeLight != !uiDark
+                                                    || sChromeForced) {
+                                                sChromeForced = true;
+                                                sChromeLight = !uiDark;
+                                                final boolean d = uiDark;
+                                                tabBar.post(() -> {
+                                                    try {
+                                                        applyTabBarOverLight(
+                                                                tabBar, d);
+                                                    } catch (Throwable ignored) {
+                                                    }
+                                                });
+                                            }
+                                            return kotlin.Unit.INSTANCE;
+                                        }
+                                        sChromeForced = false;
                                         com.example.liquidglass.BackdropLuminanceMeter
                                                 m0 = meterHolder.get();
                                         boolean overLight =
@@ -731,6 +796,7 @@ final class LiquidGlassInstaller {
     private static volatile int sDbgLastTint;
     private static volatile float sDbgLastLuma;
     private static volatile boolean sChromeLight;
+    private static volatile boolean sChromeForced;
     private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
             new java.lang.ref.WeakReference<>(null);
     private static volatile java.lang.ref.WeakReference<View> sTabBarRef = EMPTY_BAR_REF;
@@ -771,7 +837,7 @@ final class LiquidGlassInstaller {
             java.lang.reflect.Method m = com.example.liquidglass.LiquidGlassView.class
                     .getDeclaredMethod("currentTintColor");
             HeyBoxLiquidGlassModule.hookExecutable(m, chain -> {
-                int tint = 0x24FFFFFF;
+                int tint = 0x30FFFFFF;
                 try {
                     Object thiz = chain.getThisObject();
                     int mode = 0;
@@ -787,9 +853,15 @@ final class LiquidGlassInstaller {
                     boolean light =
                             mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
                     if (light) {
-                        tint = isBarView ? 0xA2FFFFFF : 0x33FFFFFF;
+                        tint = GlassConfig.lightTint();
                     } else {
-                        tint = isBarView ? 0x8F000000 : 0x2E000000;
+                        tint = GlassConfig.darkTint();
+                    }
+                    if (!isBarView) {
+                        // lighten stacked layers to ~60% of the bar's opacity
+                        int a = tint >>> 24;
+                        int na = Math.round(a * 0.6f);
+                        tint = (na << 24) | (tint & 0x00FFFFFF);
                     }
                 } catch (Throwable ignored) {
                 }

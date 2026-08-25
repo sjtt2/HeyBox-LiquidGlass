@@ -15,6 +15,8 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
 
     static final String TARGET_PKG = "com.max.xiaoheihe";
     private static final String TARGET_ACTIVITY = "com.max.xiaoheihe.MainActivity";
+    private static final String SETTINGS_ACTIVITY =
+            "com.max.xiaoheihe.module.account.SettingActivity";
 
     private static volatile int sResumeHits;
 
@@ -68,14 +70,19 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
                         Object result = chain.proceed();
                         try {
                             Object arg0 = chain.getArg(0);
-                            if (arg0 instanceof Activity
-                                    && TARGET_ACTIVITY.equals(arg0.getClass().getName())) {
-                                sResumeHits++;
-                                if (sResumeHits <= 3 || sResumeHits % 20 == 0) {
-                                    log(android.util.Log.INFO, TAG,
-                                            "MainActivity onResume #" + sResumeHits);
+                            if (arg0 instanceof Activity) {
+                                String name = arg0.getClass().getName();
+                                if (TARGET_ACTIVITY.equals(name)) {
+                                    sResumeHits++;
+                                    if (sResumeHits <= 3 || sResumeHits % 20 == 0) {
+                                        log(android.util.Log.INFO, TAG,
+                                                "MainActivity onResume #" + sResumeHits);
+                                    }
+                                    LiquidGlassInstaller.scheduleInstall((Activity) arg0);
+                                } else if (SETTINGS_ACTIVITY.equals(name)) {
+                                    LiquidGlassInstaller.injectSettingsRow(
+                                            (Activity) arg0);
                                 }
-                                LiquidGlassInstaller.scheduleInstall((Activity) arg0);
                             }
                         } catch (Throwable t) {
                             logErr("resume hook error", t);
