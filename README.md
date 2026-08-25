@@ -1,4 +1,4 @@
-# HeyBox-LiquidGlass
+# 小黑盒液态玻璃 HeyBox-LiquidGlass
 
 [![API](https://img.shields.io/badge/libxposed-API%20102-brightgreen)](https://github.com/libxposed/api)
 [![Platform](https://img.shields.io/badge/platform-Android%2013%2B-green)](https://developer.android.com)
