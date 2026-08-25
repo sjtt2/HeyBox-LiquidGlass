@@ -453,34 +453,23 @@ final class LiquidGlassInstaller {
             if (midTab != null && midTab.getParent() == host) {
                 host.removeView(midTab);
                 midTab.setVisibility(View.VISIBLE);
-                if (midTab instanceof ViewGroup && ((ViewGroup) midTab).getChildCount() > 0) {
-                    int pad = Math.round(10f * density);
-                    midTab.setPadding(pad, midTab.getPaddingTop(), pad,
-                            midTab.getPaddingBottom());
-                    View glyph = ((ViewGroup) midTab).getChildAt(0);
-                    ViewGroup.LayoutParams glp0 = glyph.getLayoutParams();
-                    if (glp0 instanceof FrameLayout.LayoutParams) {
-                        ((FrameLayout.LayoutParams) glp0).gravity =
-                                android.view.Gravity.CENTER;
-                        glyph.setLayoutParams(glp0);
-                    }
-                }
 
                 final FrameLayout center =
                         new FrameLayout(activity);
                 center.setClickable(true);
+                // the CardView keeps its natural wrapped size & rounded
+                // corners; the transparent center container covers the whole
+                // gap so taps anywhere there reach the publish action
                 center.addView(midTab, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
                         android.view.Gravity.CENTER));
-                // tapping anywhere in the gap opens the publish page
                 center.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         midTab.performClick();
                     }
                 });
-                // long-press the gap for glass settings
                 center.setOnLongClickListener(new View.OnLongClickListener() {
                     @Override
                     public boolean onLongClick(View v) {
