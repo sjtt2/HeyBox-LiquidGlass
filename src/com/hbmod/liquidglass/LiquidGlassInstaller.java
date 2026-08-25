@@ -190,6 +190,8 @@ final class LiquidGlassInstaller {
     /** Weight of the empty center column reserved for the publish button,
      *  relative to a normal tab's weight of 1. */
     private static final float CENTER_GAP_WEIGHT = 1.3f;
+    /** Set true to show the on-screen diagnosis HUD (test builds). */
+    private static final boolean USE_DEBUG_HUD = false;
     private static volatile boolean sTabBarActive;
 
     /**
@@ -314,6 +316,7 @@ final class LiquidGlassInstaller {
         try {
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
+            sTabBarRef = new java.lang.ref.WeakReference<>(tabBar);
             float density = host.getResources().getDisplayMetrics().density;
 
             java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
@@ -534,7 +537,8 @@ final class LiquidGlassInstaller {
             HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
                     "renderer=QWEA0 LiquidGlassTabBar (glass droplet selection)");
             sTabBarActive = true;
-            if (tabBar instanceof com.example.liquidglass.LiquidGlassView) {
+            if (USE_DEBUG_HUD
+                    && tabBar instanceof com.example.liquidglass.LiquidGlassView) {
                 DebugOverlay.install(activity, host,
                         (com.example.liquidglass.LiquidGlassView) tabBar);
             }
@@ -727,6 +731,9 @@ final class LiquidGlassInstaller {
     private static volatile int sDbgLastTint;
     private static volatile float sDbgLastLuma;
     private static volatile boolean sChromeLight;
+    private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
+            new java.lang.ref.WeakReference<>(null);
+    private static volatile java.lang.ref.WeakReference<View> sTabBarRef = EMPTY_BAR_REF;
 
     static int dbgTintCalls() {
         return sDbgTintCalls;
@@ -767,15 +774,22 @@ final class LiquidGlassInstaller {
                 int tint = 0x24FFFFFF;
                 try {
                     Object thiz = chain.getThisObject();
+                    int mode = 0;
+                    boolean isBarView = false;
                     if (thiz instanceof View) {
-                        // BODY follows the app theme (uiMode), NOT the backdrop
-                        // dark mode -> black smoked base / light -> white frosted
-                        int mode = ((View) thiz).getResources()
+                        mode = ((View) thiz).getResources()
                                 .getConfiguration().uiMode
                                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
-                        boolean light =
-                                mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                        tint = light ? 0xA2FFFFFF : 0xB3000000;
+                        // the droplet stacks ON TOP of the already-tinted bar,
+                        // so it gets a lighter wash to avoid double-weighting
+                        isBarView = thiz == sTabBarRef.get();
+                    }
+                    boolean light =
+                            mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    if (light) {
+                        tint = isBarView ? 0xA2FFFFFF : 0x33FFFFFF;
+                    } else {
+                        tint = isBarView ? 0x8F000000 : 0x2E000000;
                     }
                 } catch (Throwable ignored) {
                 }
