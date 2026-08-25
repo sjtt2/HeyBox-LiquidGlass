@@ -353,11 +353,11 @@ final class LiquidGlassInstaller {
             tabBar.setBevelWidth(16f * density);
             tabBar.setDispersionStrength(0.12f);
             tabBar.setEnableSensorHighlight(true);
-            // Runtime backdrop-luminance adaptation ON: the meter samples the
-            // real content behind the glass each frame and flips icon/label
-            // colors (and glass tint) whenever the backdrop crosses bright/dark.
-            // Our uiMode push below only seeds the state until frames flow.
+            // Runtime backdrop-luminance adaptation ON: drives icon/label colors
+            // (chrome) per backdrop brightness. The glass BODY tint is decoupled
+            // from it via installTintOverride() below.
             tabBar.setEnableAdaptiveTint(true);
+            installTintOverride();
 
             // bar -> app: forward taps to the hidden radio buttons
             tabBar.setOnTabSelected(new kotlin.jvm.functions.Function1<Integer, kotlin.Unit>() {
@@ -645,6 +645,47 @@ final class LiquidGlassInstaller {
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.log(android.util.Log.WARN,
                     "tab selection sync unavailable: " + t);
+        }
+    }
+
+    /** Installed once per process: theme-driven glass body tint. */
+    private static volatile boolean sTintHookInstalled;
+
+    /**
+     * Overrides the renderer's currentTintColor() so the glass BODY follows the
+     * app theme instead of counter-tinting against the backdrop:
+     *   dark theme -> subtle white tint (original REGULAR look)
+     *   light theme -> high-opacity white frosted tint
+     * Chrome (icon/label) adaptation from the luminance meter is untouched.
+     */
+    private static void installTintOverride() {
+        if (sTintHookInstalled) {
+            return;
+        }
+        sTintHookInstalled = true;
+        try {
+            java.lang.reflect.Method m = com.example.liquidglass.LiquidGlassView.class
+                    .getDeclaredMethod("currentTintColor");
+            HeyBoxLiquidGlassModule.hookExecutable(m, chain -> {
+                int tint = 0x24FFFFFF;
+                try {
+                    Object thiz = chain.getThisObject();
+                    if (thiz instanceof View) {
+                        int mode = ((View) thiz).getResources()
+                                .getConfiguration().uiMode
+                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+                        boolean light =
+                                mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                        tint = light ? 0x99FFFFFF : 0x24FFFFFF;
+                    }
+                } catch (Throwable ignored) {
+                }
+                return tint;
+            });
+            HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
+                    "glass tint override hooked (theme-driven body)");
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("tint override hook failed", t);
         }
     }
 

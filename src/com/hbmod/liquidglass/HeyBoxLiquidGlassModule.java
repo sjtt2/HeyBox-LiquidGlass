@@ -3,6 +3,7 @@ package com.hbmod.liquidglass;
 import android.app.Activity;
 import android.app.Instrumentation;
 
+import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
@@ -19,6 +20,27 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
 
     public HeyBoxLiquidGlassModule() {
         super();
+        sSelf = this;
+    }
+
+    private static volatile HeyBoxLiquidGlassModule sSelf;
+
+    /** Hooks an executable with a replacement-value function (protective mode). */
+    static void hookExecutable(java.lang.reflect.Executable ex,
+                               java.util.function.Function<XposedInterface.Chain, Object> fn) {
+        HeyBoxLiquidGlassModule self = sSelf;
+        if (self == null) {
+            throw new IllegalStateException("module instance not attached yet");
+        }
+        self.hook(ex)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    try {
+                        return fn.apply(chain);
+                    } catch (Throwable t) {
+                        return chain.proceed();
+                    }
+                });
     }
 
     @Override
