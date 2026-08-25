@@ -670,13 +670,14 @@ final class LiquidGlassInstaller {
                 int tint = 0x24FFFFFF;
                 try {
                     Object thiz = chain.getThisObject();
-                    if (thiz instanceof View) {
-                        int mode = ((View) thiz).getResources()
-                                .getConfiguration().uiMode
-                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
-                        boolean light =
-                                mode != android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                        tint = light ? 0x99FFFFFF : 0x24FFFFFF;
+                    if (thiz instanceof com.example.liquidglass.LiquidGlassView) {
+                        // Measure reality, not flags: the library's luminance
+                        // meter samples actual pixels behind the glass each
+                        // frame — the same signal that flips label colors.
+                        boolean overLight =
+                                ((com.example.liquidglass.LiquidGlassView) thiz)
+                                        .isOverLightBackground();
+                        tint = overLight ? 0xA2FFFFFF : 0x30FFFFFF;
                     }
                 } catch (Throwable ignored) {
                 }
