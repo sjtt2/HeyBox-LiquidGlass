@@ -269,7 +269,7 @@ final class LiquidGlassInstaller {
     /**
      * QWEA0/Liquid-Glass-Android renderer: FrameLayout subclass, GPU lens
      * pipeline (SDF refraction + dispersion + sensor specular + adaptive tint).
-     * Samples backdropSource directly via RenderNode recording 鈥?no bitmaps.
+     * Samples backdropSource directly via RenderNode recording 閳?no bitmaps.
      */
     static void injectSettingsRow(Activity activity) {
         try {
@@ -446,11 +446,13 @@ final class LiquidGlassInstaller {
                     android.view.Gravity.TOP | android.view.Gravity.FILL_HORIZONTAL));
 
             // Publish (+) button: the middle radio slot is hidden in this app,
-            // so lift vg_mid_tab into the CENTER of the glass tab bar itself.
+            // so reserve the center gap and host vg_mid_tab there 鈥?OUTSIDE the
+            // tab bar, because LiquidGlassTabBar intercepts ALL touches and
+            // would swallow the button's clicks.
+            View centerHost = null;
             if (midTab != null && midTab.getParent() == host) {
                 host.removeView(midTab);
                 midTab.setVisibility(View.VISIBLE);
-                // widen the touch target without moving the glyph
                 if (midTab instanceof ViewGroup && ((ViewGroup) midTab).getChildCount() > 0) {
                     int pad = Math.round(10f * density);
                     midTab.setPadding(pad, midTab.getPaddingTop(), pad,
@@ -463,30 +465,43 @@ final class LiquidGlassInstaller {
                         glyph.setLayoutParams(glp0);
                     }
                 }
-                tabBar.addView(midTab, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        android.view.Gravity.CENTER));
-            }
 
-            // keep red-dot tips above the tab bar
+                final FrameLayout center =
+                        new FrameLayout(activity);
+                center.setClickable(true);
+                center.addView(midTab, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.Gravity.CENTER));
+                // tapping anywhere in the gap opens the publish page
+                center.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        midTab.performClick();
+                    }
+                });
+                // long-press the gap for glass settings
+                center.setOnLongClickListener(new View.OnLongClickListener() {
+                    @Override
+                    public boolean onLongClick(View v) {
+                        SettingsDialog.show(activity);
+                        return true;
+                    }
+                });
+                host.addView(center, host.getChildCount());
+                centerHost = center;
+            }
+            final View centerRef = centerHost;
+
+            // keep red-dot tips above everything else
             if (tips != null && tips.getParent() == host) {
                 host.removeView(tips);
                 host.addView(tips, host.getChildCount());
             }
 
-            // swallow stray taps landing in the center gap
-            final View gapGuard = new View(activity);
-            gapGuard.setClickable(true);
-            gapGuard.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View v) {
-                    SettingsDialog.show(activity);
-                    return true;
-                }
-            });
-            host.addView(gapGuard, host.getChildCount());
-            positionGapGuard(host, tabBar, gapGuard);
+            // size & position the center button over the spacer column once
+            // the tab bar has been laid out
+            positionCenterButton(host, tabBar, centerRef);
 
             // Label colors follow the REAL backdrop via a standalone luminance
             // meter (library's own class, decoupled from its view pipeline).
@@ -712,9 +727,13 @@ final class LiquidGlassInstaller {
         }
     }
 
-    private static void positionGapGuard(final ViewGroup host,
-                                         final ViewGroup tabBar,
-                                         final View guard) {
+    /** Sizes the center publish-button host to exactly cover the spacer column. */
+    private static void positionCenterButton(final ViewGroup host,
+                                             final ViewGroup tabBar,
+                                             final View center) {
+        if (center == null) {
+            return;
+        }
         final ViewTreeObserver vto = host.getViewTreeObserver();
         vto.addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
             private boolean done;
@@ -736,19 +755,15 @@ final class LiquidGlassInstaller {
                     if (n < 3) {
                         return;
                     }
-                    int mid = n / 2;
-                    View leftEnd = ll.getChildAt(mid - 1);
-                    View rightStart = ll.getChildAt(mid);
-                    int base = tabBar.getLeft() + row.getLeft();
-                    int left = base + leftEnd.getRight();
-                    int right = base + rightStart.getLeft();
+                    View spacer = ll.getChildAt(n / 2);
+                    int left = tabBar.getLeft() + row.getLeft()
+                            + spacer.getLeft();
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            tabBar.getHeight(),
-                            android.view.Gravity.TOP);
+                            spacer.getWidth(), tabBar.getHeight(),
+                            android.view.Gravity.TOP | android.view.Gravity.START);
                     lp.leftMargin = left;
-                    lp.rightMargin = Math.max(host.getWidth() - right, 0);
-                    guard.setLayoutParams(lp);
+                    lp.topMargin = tabBar.getTop();
+                    center.setLayoutParams(lp);
                 } catch (Throwable ignored) {
                 }
             }

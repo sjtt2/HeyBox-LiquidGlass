@@ -98,7 +98,8 @@ if (-not (Test-Path $ks)) {
         -dname 'CN=Android Debug,O=Android,C=US'
     if ($LASTEXITCODE -ne 0) { throw 'keytool failed' }
 }
-$finalApk = Join-Path $proj '..\HeyBoxLiquidGlass-v1.0.1.apk'
+# Release APK output: ../release/  (bump the version in the filename on release)
+$finalApk = Join-Path $proj '..\release\HeyBoxLiquidGlass-v1.1.0.apk'
 & java -cp (Join-Path $bt 'lib\apksigner.jar') com.android.apksigner.ApkSignerTool sign `
     --ks $ks --ks-pass pass:android --key-pass pass:android `
     --out $finalApk "$out\aligned.apk"
@@ -106,6 +107,7 @@ if ($LASTEXITCODE -ne 0) { throw 'apksigner failed' }
 
 & java -cp (Join-Path $bt 'lib\apksigner.jar') com.android.apksigner.ApkSignerTool verify --print-certs $finalApk
 Get-Item $finalApk | Select-Object FullName, Length
+
 
 
 
