@@ -17,7 +17,7 @@
 $ErrorActionPreference = 'Stop'
 
 $proj     = $PSScriptRoot
-$ToolRoot = "C:\Users\sjtt2\AppData\Local\Temp\opencode\tools"   # <-- adjust me
+$ToolRoot = "D:\working\heybox\tools"   # <-- adjust me
 $tools    = $ToolRoot
 $apiJar   = Join-Path $tools 'xapi\aar\classes.jar'          # io.github.libxposed:api:102
 $plat     = Join-Path $tools 'android\platform\android-34\android.jar'
@@ -42,7 +42,7 @@ if (Test-Path $clsJar) { Remove-Item $clsJar }
 Push-Location "$out\classes"
 & jar cf $clsJar .
 Pop-Location
-$qwea0 = "C:\Users\sjtt2\AppData\Local\Temp\opencode\tools\qwea0"
+$qwea0 = Join-Path $ToolRoot 'qwea0'
 & (Join-Path $bt 'd8.bat') --release --lib $plat --min-api 26 `
     --output "$out\dex" `
     $clsJar `
