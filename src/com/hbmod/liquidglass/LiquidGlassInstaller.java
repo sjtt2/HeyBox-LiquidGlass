@@ -353,6 +353,7 @@ final class LiquidGlassInstaller {
             GlassConfig.load(activity);
             sHostRef = host;
             sDensity = host.getResources().getDisplayMetrics().density;
+            installTitleBarEntry(activity);
             // tab-bar mode: offset 0 must be FLUSH to the physical screen
             // bottom, so strip the navigation-inset padding that the generic
             // path added (slider adds on top of this zero baseline)
@@ -920,6 +921,60 @@ final class LiquidGlassInstaller {
                     "currentTintColor override hooked (theme body)");
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("currentTintColor hook failed", t);
+        }
+    }
+
+    /** 长按“我”页右上角齿轮图标打开液态玻璃设置（入口之一）。 */
+    private static volatile boolean sTitleHookInstalled;
+    private static final java.util.Map<View, Boolean> sGlassEntries =
+            java.util.Collections.synchronizedMap(
+                    new java.util.WeakHashMap<View, Boolean>());
+
+    private static void installTitleBarEntry(Activity act) {
+        if (sTitleHookInstalled) {
+            return;
+        }
+        sTitleHookInstalled = true;
+        try {
+            Class<?> htb = Class.forName(
+                    "com.max.hbcommon.component.HomeTitleBar", true,
+                    act.getClassLoader());
+            java.lang.reflect.Method g = null;
+            for (java.lang.reflect.Method mm : htb.getDeclaredMethods()) {
+                if (mm.getName().equals("getIv_home_search")
+                        && mm.getParameterCount() == 0) {
+                    g = mm;
+                    break;
+                }
+            }
+            if (g == null) {
+                HeyBoxLiquidGlassModule.log(android.util.Log.WARN,
+                        "getIv_home_search not found on HomeTitleBar");
+                return;
+            }
+            HeyBoxLiquidGlassModule.hookExecutable(g, chain -> {
+                Object r = chain.proceed();
+                try {
+                    if (r instanceof View && !sGlassEntries.containsKey(r)) {
+                        View icon = (View) r;
+                        sGlassEntries.put(icon, Boolean.TRUE);
+                        android.content.Context cx = icon.getContext();
+                        if (cx instanceof Activity) {
+                            final Activity a = (Activity) cx;
+                            icon.setOnLongClickListener(v -> {
+                                SettingsDialog.show(a);
+                                return true;
+                            });
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+                return r;
+            });
+            HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
+                    "title-bar glass entry hooked (long-press gear)");
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("title-bar entry hook failed", t);
         }
     }
 
