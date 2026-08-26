@@ -283,6 +283,7 @@ final class LiquidGlassInstaller {
     /** Re-applies current config to the live glass views (settings dialog). */
     static void refreshGlass() {
         try {
+            applyBarGeometry();
             View bar = sTabBarRef.get();
             if (bar instanceof ViewGroup) {
                 bar.invalidate();
@@ -350,6 +351,10 @@ final class LiquidGlassInstaller {
                                           int navPad) {
         try {
             GlassConfig.load(activity);
+            sHostRef = host;
+            sDensity = host.getResources().getDisplayMetrics().density;
+            sBasePadBottom = host.getPaddingBottom();
+            sCenterRefStatic = null;
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
             sTabBarRef = new java.lang.ref.WeakReference<>(tabBar);
@@ -481,6 +486,7 @@ final class LiquidGlassInstaller {
                 centerHost = center;
             }
             final View centerRef = centerHost;
+            sCenterRefStatic = centerHost;
 
             // keep red-dot tips above everything else
             if (tips != null && tips.getParent() == host) {
@@ -490,7 +496,8 @@ final class LiquidGlassInstaller {
 
             // size & position the center button over the spacer column once
             // the tab bar has been laid out
-            positionCenterButton(host, tabBar, centerRef);
+            placeCenterNow(host, tabBar, centerRef, 0);
+            applyBarGeometry();
 
             // Label colors follow the REAL backdrop via a standalone luminance
             // meter (library's own class, decoupled from its view pipeline).
@@ -716,47 +723,73 @@ final class LiquidGlassInstaller {
         }
     }
 
-    /** Sizes the center publish-button host to exactly cover the spacer column. */
-    private static void positionCenterButton(final ViewGroup host,
-                                             final ViewGroup tabBar,
-                                             final View center) {
-        if (center == null) {
+    /** Places the center button host over the spacer column (retryable). */
+    private static void placeCenterNow(ViewGroup host, ViewGroup tabBar,
+                                       View center, int attempt) {
+        if (center == null || attempt > 10) {
             return;
         }
-        final ViewTreeObserver vto = host.getViewTreeObserver();
-        vto.addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-            private boolean done;
-            @Override
-            public void onGlobalLayout() {
-                if (done) {
-                    return;
-                }
-                done = true;
-                host.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                try {
-                    View row = tabBar.getChildAt(0);
-                    if (!(row instanceof android.widget.LinearLayout)) {
-                        return;
-                    }
-                    android.widget.LinearLayout ll =
-                            (android.widget.LinearLayout) row;
-                    int n = ll.getChildCount();
-                    if (n < 3) {
-                        return;
-                    }
-                    View spacer = ll.getChildAt(n / 2);
-                    int left = tabBar.getLeft() + row.getLeft()
-                            + spacer.getLeft();
-                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                            spacer.getWidth(), tabBar.getHeight(),
-                            android.view.Gravity.TOP | android.view.Gravity.START);
-                    lp.leftMargin = left;
-                    lp.topMargin = tabBar.getTop();
-                    center.setLayoutParams(lp);
-                } catch (Throwable ignored) {
-                }
+        try {
+            View row = tabBar.getChildAt(0);
+            if (!(row instanceof android.widget.LinearLayout)) {
+                return;
             }
-        });
+            android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
+            int n = ll.getChildCount();
+            if (n < 3) {
+                return;
+            }
+            View spacer = ll.getChildAt(n / 2);
+            if (spacer.getWidth() == 0) {
+                final ViewGroup h2 = host, t2 = tabBar;
+                final View c2 = center;
+                final int a2 = attempt + 1;
+                center.post(() -> placeCenterNow(h2, t2, c2, a2));
+                return;
+            }
+            int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    spacer.getWidth(), tabBar.getHeight(),
+                    android.view.Gravity.TOP | android.view.Gravity.START);
+            lp.leftMargin = left;
+            lp.topMargin = tabBar.getTop();
+            center.setLayoutParams(lp);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** Applies user height/offset config to the live bar (settings dialog). */
+    static void applyBarGeometry() {
+        try {
+            View barV = sTabBarRef.get();
+            ViewGroup host = sHostRef;
+            View center = sCenterRefStatic;
+            if (!(barV instanceof ViewGroup) || host == null
+                    || !(barV.getLayoutParams()
+                            instanceof FrameLayout.LayoutParams)) {
+                return;
+            }
+            float den = sDensity > 0 ? sDensity : 3f;
+            int hDp = GlassConfig.barHeightDp;
+            FrameLayout.LayoutParams blp =
+                    (FrameLayout.LayoutParams) barV.getLayoutParams();
+            blp.height = hDp <= 0
+                    ? ViewGroup.LayoutParams.WRAP_CONTENT
+                    : Math.round(hDp * den);
+            barV.setLayoutParams(blp);
+
+            int off = Math.max(0, GlassConfig.barOffsetDp);
+            host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
+                    host.getPaddingRight(), sBasePadBottom
+                            + Math.round(off * den));
+
+            host.requestLayout();
+            final ViewGroup h2 = host;
+            final ViewGroup b2 = (ViewGroup) barV;
+            host.post(() -> placeCenterNow(h2, b2, center, 0));
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("applyBarGeometry failed", t);
+        }
     }
 
     private static void setupTabSelectionSync(final android.widget.RadioGroup bar,
@@ -801,6 +834,10 @@ final class LiquidGlassInstaller {
     private static volatile float sDbgLastLuma;
     private static volatile boolean sChromeLight;
     private static volatile boolean sChromeForced;
+    private static volatile ViewGroup sHostRef;
+    private static volatile View sCenterRefStatic;
+    private static volatile float sDensity;
+    private static int sBasePadBottom;
     private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
             new java.lang.ref.WeakReference<>(null);
     private static volatile java.lang.ref.WeakReference<View> sTabBarRef = EMPTY_BAR_REF;

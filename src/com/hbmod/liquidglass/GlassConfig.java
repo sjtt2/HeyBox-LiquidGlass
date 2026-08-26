@@ -16,6 +16,10 @@ final class GlassConfig {
     static volatile int lightColor = 0xFFFFFFFF;
     static volatile int lightAlphaPct = 64;
     static volatile boolean adaptiveChrome = true;
+    /** 0 = auto (hug content); otherwise explicit height in dp */
+    static volatile int barHeightDp = 0;
+    /** extra distance between the glass pill and the screen bottom, dp */
+    static volatile int barOffsetDp = 0;
 
     private GlassConfig() {
     }
@@ -41,6 +45,8 @@ final class GlassConfig {
             lightColor = p.getInt("lightColor", lightColor);
             lightAlphaPct = p.getInt("lightAlphaPct", lightAlphaPct);
             adaptiveChrome = p.getBoolean("adaptiveChrome", true);
+            barHeightDp = p.getInt("barHeightDp", barHeightDp);
+            barOffsetDp = p.getInt("barOffsetDp", barOffsetDp);
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("config load failed", t);
         }
@@ -55,6 +61,8 @@ final class GlassConfig {
             e.putInt("lightColor", lightColor);
             e.putInt("lightAlphaPct", lightAlphaPct);
             e.putBoolean("adaptiveChrome", adaptiveChrome);
+            e.putInt("barHeightDp", barHeightDp);
+            e.putInt("barOffsetDp", barOffsetDp);
             e.apply();
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("config save failed", t);
@@ -67,5 +75,7 @@ final class GlassConfig {
         lightColor = 0xFFFFFFFF;
         lightAlphaPct = 64;
         adaptiveChrome = true;
+        barHeightDp = 0;
+        barOffsetDp = 0;
     }
 }

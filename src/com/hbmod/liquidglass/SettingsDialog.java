@@ -45,6 +45,7 @@ final class SettingsDialog {
                     den, gapS, gapM);
             buildTintSection(act, root, "亮色模式底色", LIGHT_PRESETS, false,
                     den, gapS, gapM);
+            buildLayoutSection(act, root, den, gapS, gapM);
 
             TextView chromeTitle = new TextView(act);
             chromeTitle.setText("文字图标");
@@ -94,6 +95,74 @@ final class SettingsDialog {
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("settings dialog failed", t);
         }
+    }
+
+    /** 布局：玻璃条高度（0=自适应）与距屏幕底部的悬浮距离 */
+    private static void buildLayoutSection(final Activity act, LinearLayout root,
+                                           float den, int gapS, int gapM) {
+        root.addView(sectionLabel(act, "布局"));
+
+        final TextView hLabel = new TextView(act);
+        hLabel.setTextSize(12f);
+        hLabel.setText(heightText(GlassConfig.barHeightDp));
+        SeekBar hSeek = new SeekBar(act);
+        hSeek.setMax(48); // progress 0 = 自适应, 1..48 -> 52..99dp
+        hSeek.setProgress(Math.max(0, Math.min(GlassConfig.barHeightDp - 52, 48)));
+        hSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                if (!fromUser) {
+                    return;
+                }
+                GlassConfig.barHeightDp = p == 0 ? 0 : p + 51;
+                hLabel.setText(heightText(GlassConfig.barHeightDp));
+                persistAndRefresh(act);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        root.addView(hLabel);
+        root.addView(hSeek);
+        addSpacing(root, gapS);
+
+        final TextView oLabel = new TextView(act);
+        oLabel.setTextSize(12f);
+        oLabel.setText("距屏幕底部：" + GlassConfig.barOffsetDp + "dp");
+        SeekBar oSeek = new SeekBar(act);
+        oSeek.setMax(40); // 0..40dp
+        oSeek.setProgress(Math.max(0, Math.min(GlassConfig.barOffsetDp, 40)));
+        oSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                if (!fromUser) {
+                    return;
+                }
+                GlassConfig.barOffsetDp = p;
+                oLabel.setText("距屏幕底部：" + p + "dp");
+                persistAndRefresh(act);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        root.addView(oLabel);
+        root.addView(oSeek);
+        addSpacing(root, gapM);
+    }
+
+    private static String heightText(int dp) {
+        return dp <= 0 ? "高度：自适应" : "高度：" + dp + "dp";
     }
 
     private static TextView sectionLabel(android.content.Context ctx, String text) {
