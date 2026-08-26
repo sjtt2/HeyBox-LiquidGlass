@@ -353,7 +353,13 @@ final class LiquidGlassInstaller {
             GlassConfig.load(activity);
             sHostRef = host;
             sDensity = host.getResources().getDisplayMetrics().density;
-            sBasePadBottom = host.getPaddingBottom();
+            // tab-bar mode: offset 0 must be FLUSH to the physical screen
+            // bottom, so strip the navigation-inset padding that the generic
+            // path added (slider adds on top of this zero baseline)
+            int flushPad = Math.max(host.getPaddingBottom() - navPad, 0);
+            host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
+                    host.getPaddingRight(), flushPad);
+            sBasePadBottom = flushPad;
             sCenterRefStatic = null;
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
