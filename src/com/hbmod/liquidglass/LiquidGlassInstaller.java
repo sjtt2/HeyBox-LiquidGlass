@@ -371,6 +371,8 @@ final class LiquidGlassInstaller {
                     new java.util.ArrayList<>();
             final java.util.List<android.widget.RadioButton> visibleButtons =
                     new java.util.ArrayList<>();
+            final java.util.List<Boolean> repeatRefreshTabs =
+                    new java.util.ArrayList<>();
             for (int i = 0; i < bar.getChildCount(); i++) {
                 View child = bar.getChildAt(i);
                 if (child instanceof android.widget.RadioButton
@@ -384,6 +386,7 @@ final class LiquidGlassInstaller {
                     items.add(new com.example.liquidglass.LiquidGlassTabBar.TabItem(
                             title, icon));
                     visibleButtons.add(rb);
+                    repeatRefreshTabs.add(isRepeatRefreshTab(title));
                 }
             }
             if (items.isEmpty()) {
@@ -429,6 +432,7 @@ final class LiquidGlassInstaller {
                     return kotlin.Unit.INSTANCE;
                 }
             });
+            installRepeatClickRefresh(tabBar, visibleButtons, repeatRefreshTabs);
 
             // initial selection from current checked state
             int checked = bar.getCheckedRadioButtonId();
@@ -797,6 +801,90 @@ final class LiquidGlassInstaller {
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("applyBarGeometry failed", t);
         }
+    }
+
+    private static boolean isRepeatRefreshTab(CharSequence title) {
+        if (title == null) {
+            return false;
+        }
+        String value = title.toString().trim();
+        return "首页".equals(value) || "热点".equals(value) || "游戏库".equals(value);
+    }
+
+    private static void installRepeatClickRefresh(
+            final com.example.liquidglass.LiquidGlassTabBar tabBar,
+            final java.util.List<android.widget.RadioButton> buttons,
+            final java.util.List<Boolean> repeatRefreshTabs) {
+        if (tabBar == null || buttons == null || repeatRefreshTabs == null) {
+            return;
+        }
+        final float[] down = new float[2];
+        final int[] selectedBefore = new int[1];
+        final boolean[] moved = new boolean[1];
+        tabBar.setOnTouchListener((view, event) -> {
+            try {
+                int action = event.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    down[0] = event.getX();
+                    down[1] = event.getY();
+                    selectedBefore[0] = tabBar.getSelectedIndex();
+                    moved[0] = false;
+                } else if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    float slop = android.view.ViewConfiguration.get(view.getContext())
+                            .getScaledTouchSlop();
+                    float dx = event.getX() - down[0];
+                    float dy = event.getY() - down[1];
+                    moved[0] = moved[0] || dx * dx + dy * dy > slop * slop;
+                } else if (action == android.view.MotionEvent.ACTION_UP && !moved[0]) {
+                    final int target = findTabIndexAt(tabBar, event.getX());
+                    final int before = selectedBefore[0];
+                    tabBar.post(() -> {
+                        try {
+                            if (target != before || target != tabBar.getSelectedIndex()
+                                    || target < 0 || target >= buttons.size()
+                                    || target >= repeatRefreshTabs.size()
+                                    || !Boolean.TRUE.equals(repeatRefreshTabs.get(target))) {
+                                return;
+                            }
+                            android.widget.RadioButton button = buttons.get(target);
+                            if (button != null) {
+                                button.performClick();
+                            }
+                        } catch (Throwable t) {
+                            HeyBoxLiquidGlassModule.logErr(
+                                    "repeat tab refresh failed", t);
+                        }
+                    });
+                } else if (action == android.view.MotionEvent.ACTION_CANCEL) {
+                    moved[0] = false;
+                }
+            } catch (Throwable t) {
+                HeyBoxLiquidGlassModule.logErr("repeat tab touch failed", t);
+            }
+            return false;
+        });
+    }
+
+    private static int findTabIndexAt(
+            com.example.liquidglass.LiquidGlassTabBar tabBar, float x) {
+        if (tabBar == null || tabBar.getChildCount() <= 0
+                || !(tabBar.getChildAt(0) instanceof android.view.ViewGroup)) {
+            return -1;
+        }
+        android.view.ViewGroup row = (android.view.ViewGroup) tabBar.getChildAt(0);
+        float localX = x - row.getLeft();
+        int index = 0;
+        for (int childIndex = 0; childIndex < row.getChildCount(); childIndex++) {
+            View child = row.getChildAt(childIndex);
+            if (!(child instanceof android.widget.LinearLayout)) {
+                continue;
+            }
+            if (localX >= child.getLeft() && localX <= child.getRight()) {
+                return index;
+            }
+            index++;
+        }
+        return -1;
     }
 
     private static void setupTabSelectionSync(final android.widget.RadioGroup bar,
