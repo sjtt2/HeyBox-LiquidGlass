@@ -15,3 +15,7 @@ debug.keystore
 *.apk
 *.aab
 local.properties
+
+# internal working docs — not for the public repo
+AGENTS.md
+PROGRESS.md

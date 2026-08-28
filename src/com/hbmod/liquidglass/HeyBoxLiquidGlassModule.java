@@ -71,17 +71,20 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
                         try {
                             Object arg0 = chain.getArg(0);
                             if (arg0 instanceof Activity) {
+                                Activity activity = (Activity) arg0;
+                                GlassConfig.load(activity);
                                 String name = arg0.getClass().getName();
                                 if (TARGET_ACTIVITY.equals(name)) {
+                                    WindowImmersiveController.apply(activity);
                                     sResumeHits++;
                                     if (sResumeHits <= 3 || sResumeHits % 20 == 0) {
                                         log(android.util.Log.INFO, TAG,
                                                 "MainActivity onResume #" + sResumeHits);
                                     }
-                                    LiquidGlassInstaller.scheduleInstall((Activity) arg0);
+                                    LiquidGlassInstaller.scheduleInstall(activity);
                                 } else if (SETTINGS_ACTIVITY.equals(name)) {
                                     LiquidGlassInstaller.injectSettingsRow(
-                                            (Activity) arg0);
+                                            activity);
                                 }
                             }
                         } catch (Throwable t) {

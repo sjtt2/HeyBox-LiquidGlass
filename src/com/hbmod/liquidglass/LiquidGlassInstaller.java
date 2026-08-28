@@ -283,6 +283,7 @@ final class LiquidGlassInstaller {
     /** Re-applies current config to the live glass views (settings dialog). */
     static void refreshGlass() {
         try {
+            WindowImmersiveController.refresh();
             applyBarGeometry();
             View bar = sTabBarRef.get();
             if (bar instanceof ViewGroup) {
@@ -769,6 +770,36 @@ final class LiquidGlassInstaller {
         }
     }
 
+    /**
+     * The library adds its tabsRow with a bare FrameLayout.LayoutParams
+     * (MATCH_PARENT, WRAP_CONTENT), which lands at TOP|START. Once the bar
+     * runs at a fixed height the row sticks to the top instead of sitting
+     * next to the centered publish button, so pin it to CENTER_VERTICAL.
+     */
+    private static void centerTabsRow(ViewGroup tabBar) {
+        try {
+            if (tabBar.getChildCount() == 0) {
+                return;
+            }
+            View row = tabBar.getChildAt(0);
+            if (row == null || !(row.getLayoutParams()
+                    instanceof FrameLayout.LayoutParams)) {
+                return;
+            }
+            FrameLayout.LayoutParams rlp =
+                    (FrameLayout.LayoutParams) row.getLayoutParams();
+            int want = android.view.Gravity.CENTER_VERTICAL
+                    | android.view.Gravity.FILL_HORIZONTAL;
+            if (rlp.gravity == want) {
+                return;
+            }
+            rlp.gravity = want;
+            row.setLayoutParams(rlp);
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("center tabs row failed", t);
+        }
+    }
+
     /** Applies user height/offset config to the live bar (settings dialog). */
     static void applyBarGeometry() {
         try {
@@ -788,6 +819,8 @@ final class LiquidGlassInstaller {
                     ? ViewGroup.LayoutParams.WRAP_CONTENT
                     : Math.round(hDp * den);
             barV.setLayoutParams(blp);
+
+            centerTabsRow((ViewGroup) barV);
 
             int off = Math.max(0, GlassConfig.barOffsetDp);
             host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),

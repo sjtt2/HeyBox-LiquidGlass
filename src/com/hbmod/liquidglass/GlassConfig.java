@@ -16,10 +16,11 @@ final class GlassConfig {
     static volatile int lightColor = 0xFFFFFFFF;
     static volatile int lightAlphaPct = 64;
     static volatile boolean adaptiveChrome = true;
+    static volatile boolean immersiveGestureNavigation = true;
     /** 0 = auto (hug content); otherwise explicit height in dp */
     static volatile int barHeightDp = 0;
     /** extra distance between the glass pill and the screen bottom, dp */
-    static volatile int barOffsetDp = 0;
+    static volatile int barOffsetDp = 16;
 
     private GlassConfig() {
     }
@@ -40,6 +41,7 @@ final class GlassConfig {
     static void load(Context ctx) {
         try {
             SharedPreferences p = ctx.getSharedPreferences(PREFS, 0);
+            immersiveGestureNavigation = p.getBoolean("immersive", true);
             darkColor = p.getInt("darkColor", darkColor);
             darkAlphaPct = p.getInt("darkAlphaPct", darkAlphaPct);
             lightColor = p.getInt("lightColor", lightColor);
@@ -56,6 +58,7 @@ final class GlassConfig {
         try {
             SharedPreferences.Editor e =
                     ctx.getSharedPreferences(PREFS, 0).edit();
+            e.putBoolean("immersive", immersiveGestureNavigation);
             e.putInt("darkColor", darkColor);
             e.putInt("darkAlphaPct", darkAlphaPct);
             e.putInt("lightColor", lightColor);
@@ -76,6 +79,7 @@ final class GlassConfig {
         lightAlphaPct = 64;
         adaptiveChrome = true;
         barHeightDp = 0;
-        barOffsetDp = 0;
+        barOffsetDp = 16;
+        immersiveGestureNavigation = true;
     }
 }

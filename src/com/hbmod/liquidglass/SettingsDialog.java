@@ -1,24 +1,45 @@
 package com.hbmod.liquidglass;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.Context;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.os.Build;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.CompoundButton;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
 /**
- * Programmatic settings dialog rendered inside the host app process.
- * Sections: dark tint (color+opacity), light tint (color+opacity),
- * adaptive-chrome toggle, restore defaults. Every change persists and
- * applies immediately.
+ * Programmatic settings sheet rendered inside the host app process, styled
+ * after heybox's own sheets: rounded bottom corners, grabber, grouped cards
+ * on a tinted page, brand-blue accents, day/night aware.
+ * Anchored to the top of the screen and capped in height so the glass bar
+ * and system navigation stay visible underneath while values are tuned;
+ * undimmed and non-modal for the same reason.
+ * Sections: dark tint, light tint, layout, system navigation, chrome.
+ * Every change persists and applies immediately.
  */
 final class SettingsDialog {
+
+    private static final int ACCENT_DAY = 0xFF2B7FFF;
+    private static final int ACCENT_NIGHT = 0xFF4A93FF;
 
     private static final int[] DARK_PRESETS = {
             0xFF000000, 0xFF1C1C1E, 0xFF2C2C2E, 0xFF10141A
@@ -32,201 +53,316 @@ final class SettingsDialog {
 
     static void show(final Activity act) {
         try {
-            float den = act.getResources().getDisplayMetrics().density;
-            int pad = Math.round(20f * den);
-            int gapS = Math.round(8f * den);
-            int gapM = Math.round(14f * den);
+            final Palette p = new Palette(isNight(act));
+            final float den = act.getResources().getDisplayMetrics().density;
 
-            final LinearLayout root = new LinearLayout(act);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setPadding(pad, pad, pad, Math.round(10f * den));
+            final Dialog dlg = new Dialog(act, p.night
+                    ? android.R.style.Theme_Material_Dialog_NoActionBar
+                    : android.R.style.Theme_Material_Light_Dialog_NoActionBar);
 
-            buildTintSection(act, root, "暗色模式底色", DARK_PRESETS, true,
-                    den, gapS, gapM);
-            buildTintSection(act, root, "亮色模式底色", LIGHT_PRESETS, false,
-                    den, gapS, gapM);
-            buildLayoutSection(act, root, den, gapS, gapM);
+            LinearLayout sheet = new LinearLayout(act);
+            sheet.setOrientation(LinearLayout.VERTICAL);
+            sheet.setBackground(sheetBackground(p, den));
+            sheet.setPadding(0, statusInset(act), 0, 0);
+            sheet.addView(header(act, p, den, dlg));
 
-            TextView chromeTitle = new TextView(act);
-            chromeTitle.setText("文字图标");
-            chromeTitle.setTextSize(13f);
-            chromeTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            root.addView(chromeTitle);
+            final LinearLayout content = new LinearLayout(act);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(den, 16), 0, dp(den, 16), dp(den, 16));
 
-            Switch adapt = new Switch(act);
-            adapt.setText("根据背景亮度切换黑白");
-            adapt.setChecked(GlassConfig.adaptiveChrome);
-            adapt.setOnCheckedChangeListener(
-                    new CompoundButton.OnCheckedChangeListener() {
-                        @Override
-                        public void onCheckedChanged(CompoundButton b, boolean c) {
-                            GlassConfig.adaptiveChrome = c;
-                            persistAndRefresh(act);
-                        }
-                    });
-            root.addView(adapt);
-
-            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            bp.topMargin = Math.round(18f * den);
-            Button reset = new Button(act);
-            reset.setText("恢复默认");
-            reset.setOnClickListener(new View.OnClickListener() {
+            final int screenH = act.getResources().getDisplayMetrics().heightPixels;
+            final int reserve = Math.min(dp(den, 240),
+                    Math.round(screenH * 0.42f));
+            final int chrome = statusInset(act) + dp(den, 96);
+            final int maxHeight = Math.max(dp(den, 200),
+                    screenH - reserve - chrome);
+            ScrollView scroller = new ScrollView(act) {
                 @Override
-                public void onClick(View v) {
-                    GlassConfig.resetDefaults();
-                    persistAndRefresh(act);
-                    Object dlg = root.getTag();
-                    if (dlg instanceof AlertDialog) {
-                        ((AlertDialog) dlg).dismiss();
-                    }
-                    show(act);
+                protected void onMeasure(int widthSpec, int heightSpec) {
+                    super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(
+                            maxHeight, MeasureSpec.AT_MOST));
                 }
-            });
-            root.addView(reset, bp);
+            };
+            scroller.setVerticalScrollBarEnabled(false);
+            scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            scroller.addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            sheet.addView(scroller, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            sheet.addView(grabber(act, p, den));
 
-            AlertDialog dlg = new AlertDialog.Builder(act)
-                    .setTitle("液态玻璃设置")
-                    .setView(root)
-                    .setPositiveButton("完成", null)
-                    .show();
-            root.setTag(dlg);
+            buildContent(act, content, p, den);
+
+            dlg.setContentView(sheet);
+            Window w = dlg.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                w.setGravity(Gravity.TOP);
+                w.setDimAmount(0f);
+                w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
+                w.setWindowAnimations(android.R.style.Animation_Dialog);
+            }
+            dlg.show();
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("settings dialog failed", t);
         }
     }
 
-    /** 布局：玻璃条高度（0=自适应）与距屏幕底部的悬浮距离 */
-    private static void buildLayoutSection(final Activity act, LinearLayout root,
-                                           float den, int gapS, int gapM) {
-        root.addView(sectionLabel(act, "布局"));
+    private static void buildContent(final Activity act,
+                                     final LinearLayout content,
+                                     final Palette p, final float den) {
+        content.addView(sectionLabel(act, "外观", p, den));
+        LinearLayout look = card(act, p, den);
+        buildTintGroup(act, look, "暗色模式底色", DARK_PRESETS, true, p, den);
+        look.addView(divider(act, p, den));
+        buildTintGroup(act, look, "亮色模式底色", LIGHT_PRESETS, false, p, den);
+        content.addView(look);
 
-        final TextView hLabel = new TextView(act);
-        hLabel.setTextSize(12f);
-        hLabel.setText(heightText(GlassConfig.barHeightDp));
-        SeekBar hSeek = new SeekBar(act);
-        hSeek.setMax(48); // progress 0 = 自适应, 1..48 -> 52..99dp
-        hSeek.setProgress(Math.max(0, Math.min(GlassConfig.barHeightDp - 52, 48)));
-        hSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        content.addView(sectionLabel(act, "布局", p, den));
+        content.addView(buildLayoutCard(act, p, den));
+
+        content.addView(sectionLabel(act, "系统导航", p, den));
+        LinearLayout nav = card(act, p, den);
+        nav.addView(switchRow(act, "沉浸式小白条",
+                "隐藏系统手势条，页面内容延伸至屏幕底部",
+                GlassConfig.immersiveGestureNavigation, p, den,
+                new OnToggle() {
+                    @Override
+                    public void onToggle(boolean checked) {
+                        GlassConfig.immersiveGestureNavigation = checked;
+                        persistAndRefresh(act);
+                    }
+                }));
+        content.addView(nav);
+
+        content.addView(sectionLabel(act, "文字图标", p, den));
+        LinearLayout chrome = card(act, p, den);
+        chrome.addView(switchRow(act, "自适应反色",
+                "标签文字与图标随背景亮度切换黑白",
+                GlassConfig.adaptiveChrome, p, den,
+                new OnToggle() {
+                    @Override
+                    public void onToggle(boolean checked) {
+                        GlassConfig.adaptiveChrome = checked;
+                        persistAndRefresh(act);
+                    }
+                }));
+        content.addView(chrome);
+
+        TextView reset = new TextView(act);
+        reset.setText("恢复默认");
+        reset.setTextSize(15f);
+        reset.setTextColor(p.danger);
+        reset.setGravity(Gravity.CENTER);
+        reset.setBackground(clickable(p, dp(den, 12), p.card));
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(den, 48));
+        rp.topMargin = dp(den, 20);
+        reset.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                if (!fromUser) {
-                    return;
-                }
-                GlassConfig.barHeightDp = p == 0 ? 0 : p + 51;
-                hLabel.setText(heightText(GlassConfig.barHeightDp));
+            public void onClick(View v) {
+                GlassConfig.resetDefaults();
                 persistAndRefresh(act);
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar s) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar s) {
+                content.removeAllViews();
+                buildContent(act, content, p, den);
             }
         });
-        root.addView(hLabel);
-        root.addView(hSeek);
-        addSpacing(root, gapS);
-
-        final TextView oLabel = new TextView(act);
-        oLabel.setTextSize(12f);
-        oLabel.setText("距屏幕底部：" + GlassConfig.barOffsetDp + "dp");
-        SeekBar oSeek = new SeekBar(act);
-        oSeek.setMax(40); // 0..40dp
-        oSeek.setProgress(Math.max(0, Math.min(GlassConfig.barOffsetDp, 40)));
-        oSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                if (!fromUser) {
-                    return;
-                }
-                GlassConfig.barOffsetDp = p;
-                oLabel.setText("距屏幕底部：" + p + "dp");
-                persistAndRefresh(act);
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar s) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar s) {
-            }
-        });
-        root.addView(oLabel);
-        root.addView(oSeek);
-        addSpacing(root, gapM);
+        content.addView(reset, rp);
     }
 
-    private static String heightText(int dp) {
-        return dp <= 0 ? "高度：自适应" : "高度：" + dp + "dp";
+    private static LinearLayout buildLayoutCard(final Activity act,
+                                                final Palette p, float den) {
+        LinearLayout box = card(act, p, den);
+
+        box.addView(sliderRow(act, "玻璃条高度", heightText(GlassConfig.barHeightDp),
+                48, Math.max(0, Math.min(GlassConfig.barHeightDp - 51, 48)),
+                p, den, new OnSlide() {
+                    @Override
+                    public String onSlide(int progress) {
+                        GlassConfig.barHeightDp = progress == 0 ? 0 : progress + 51;
+                        persistAndRefresh(act);
+                        return heightText(GlassConfig.barHeightDp);
+                    }
+                }));
+        box.addView(divider(act, p, den));
+        box.addView(sliderRow(act, "距屏幕底部",
+                GlassConfig.barOffsetDp + "dp", 40,
+                Math.max(0, Math.min(GlassConfig.barOffsetDp, 40)),
+                p, den, new OnSlide() {
+                    @Override
+                    public String onSlide(int progress) {
+                        GlassConfig.barOffsetDp = progress;
+                        persistAndRefresh(act);
+                        return progress + "dp";
+                    }
+                }));
+        return box;
     }
 
-    private static TextView sectionLabel(android.content.Context ctx, String text) {
-        TextView tv = new TextView(ctx);
-        tv.setText(text);
-        tv.setTextSize(13f);
-        tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        return tv;
-    }
+    private static void buildTintGroup(final Activity act, LinearLayout card,
+                                       String title, final int[] presets,
+                                       final boolean isDark, final Palette p,
+                                       final float den) {
+        LinearLayout group = new LinearLayout(act);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 14));
 
-    private static void addSpacing(LinearLayout root, int px) {
-        if (px <= 0) {
-            px = 1;
-        }
-        View sp = new View(root.getContext());
-        root.addView(sp, new LinearLayout.LayoutParams(1, px));
-    }
+        TextView label = new TextView(act);
+        label.setText(title);
+        label.setTextSize(15f);
+        label.setTextColor(p.textPrimary);
+        group.addView(label);
 
-    private static void buildTintSection(final Activity act, LinearLayout root,
-                                         String title, final int[] presets,
-                                         final boolean isDark,
-                                         float den, int gapS, int gapM) {
-        root.addView(sectionLabel(act, title));
-
-        LinearLayout rowColors = new LinearLayout(act);
-        rowColors.setOrientation(LinearLayout.HORIZONTAL);
-        rowColors.setPadding(0, gapS, 0, 0);
-        final View[] swatches = new View[presets.length];
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(den, 12), 0, 0);
+        final View[] rings = new View[presets.length];
         for (int i = 0; i < presets.length; i++) {
             final int idx = i;
-            View sw = new View(act);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    Math.round(38f * den), Math.round(38f * den));
-            lp.rightMargin = gapS;
-            sw.setLayoutParams(lp);
-            sw.setOnClickListener(new View.OnClickListener() {
+            FrameLayout holder = new FrameLayout(act);
+            LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
+                    dp(den, 40), dp(den, 40));
+            hp.rightMargin = dp(den, 12);
+
+            View fill = new View(act);
+            GradientDrawable fd = new GradientDrawable();
+            fd.setShape(GradientDrawable.OVAL);
+            fd.setColor(presets[i]);
+            fd.setStroke(dp(den, 1), p.hairline);
+            fill.setBackground(fd);
+            holder.addView(fill, new FrameLayout.LayoutParams(
+                    dp(den, 28), dp(den, 28), Gravity.CENTER));
+
+            holder.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     setPreset(isDark, presets[idx]);
                     persistAndRefresh(act);
-                    markSelection(swatches, presets, isDark);
+                    markSelection(rings, presets, isDark, p, den);
                 }
             });
-            rowColors.addView(sw);
-            swatches[i] = sw;
+            row.addView(holder, hp);
+            rings[i] = holder;
         }
-        root.addView(rowColors);
-        markSelection(swatches, presets, isDark);
+        markSelection(rings, presets, isDark, p, den);
+        group.addView(row);
+        card.addView(group);
 
-        final TextView pctLabel = new TextView(act);
-        pctLabel.setTextSize(12f);
-        pctLabel.setText(currentOpacityText(isDark));
-        SeekBar seek = new SeekBar(act);
-        seek.setMax(85); // opacity 10..95
-        seek.setProgress(opacityToProgress(isDark));
+        card.addView(divider(act, p, den));
+        card.addView(sliderRow(act, "不透明度", currentOpacityText(isDark), 85,
+                opacityToProgress(isDark), p, den, new OnSlide() {
+                    @Override
+                    public String onSlide(int progress) {
+                        setOpacity(isDark, progress + 10);
+                        persistAndRefresh(act);
+                        return currentOpacityText(isDark);
+                    }
+                }));
+    }
+
+    private interface OnToggle {
+        void onToggle(boolean checked);
+    }
+
+    private interface OnSlide {
+        String onSlide(int progress);
+    }
+
+    private static View switchRow(Context ctx, String title, String subtitle,
+                                  boolean checked, Palette p, float den,
+                                  final OnToggle cb) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 14));
+
+        LinearLayout texts = new LinearLayout(ctx);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t = new TextView(ctx);
+        t.setText(title);
+        t.setTextSize(15f);
+        t.setTextColor(p.textPrimary);
+        texts.addView(t);
+        if (subtitle != null) {
+            TextView s = new TextView(ctx);
+            s.setText(subtitle);
+            s.setTextSize(12f);
+            s.setTextColor(p.textSecondary);
+            s.setPadding(0, dp(den, 3), 0, 0);
+            texts.addView(s);
+        }
+        row.addView(texts, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        final Switch sw = new Switch(ctx);
+        sw.setChecked(checked);
+        sw.setThumbTintList(new ColorStateList(
+                new int[][]{{android.R.attr.state_checked}, {}},
+                new int[]{p.accent, p.thumbOff}));
+        sw.setTrackTintList(new ColorStateList(
+                new int[][]{{android.R.attr.state_checked}, {}},
+                new int[]{p.accent, p.trackOff}));
+        sw.setOnCheckedChangeListener(
+                new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton b, boolean c) {
+                        cb.onToggle(c);
+                    }
+                });
+        row.addView(sw);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sw.toggle();
+            }
+        });
+        return row;
+    }
+
+    private static View sliderRow(Context ctx, String title, String value,
+                                  int max, int progress, Palette p, float den,
+                                  final OnSlide cb) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 10));
+
+        LinearLayout head = new LinearLayout(ctx);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView t = new TextView(ctx);
+        t.setText(title);
+        t.setTextSize(15f);
+        t.setTextColor(p.textPrimary);
+        head.addView(t, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView v = new TextView(ctx);
+        v.setText(value);
+        v.setTextSize(14f);
+        v.setTextColor(p.accent);
+        head.addView(v);
+        row.addView(head);
+
+        SeekBar seek = new SeekBar(ctx);
+        seek.setMax(max);
+        seek.setProgress(progress);
+        seek.setProgressTintList(ColorStateList.valueOf(p.accent));
+        seek.setThumbTintList(ColorStateList.valueOf(p.accent));
+        seek.setProgressBackgroundTintList(ColorStateList.valueOf(p.trackOff));
+        seek.setPadding(seek.getPaddingLeft(), dp(den, 8),
+                seek.getPaddingRight(), dp(den, 4));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
-            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+            public void onProgressChanged(SeekBar s, int pos, boolean fromUser) {
                 if (!fromUser) {
                     return;
                 }
-                setOpacity(isDark, p + 10);
-                pctLabel.setText(currentOpacityText(isDark));
-                persistAndRefresh(act);
+                v.setText(cb.onSlide(pos));
             }
 
             @Override
@@ -237,23 +373,142 @@ final class SettingsDialog {
             public void onStopTrackingTouch(SeekBar s) {
             }
         });
-        root.addView(pctLabel);
-        root.addView(seek);
-        addSpacing(root, gapM);
+        row.addView(seek);
+        return row;
     }
 
-    private static void markSelection(View[] swatches, int[] presets,
-                                      boolean isDark) {
+    private static void markSelection(View[] rings, int[] presets,
+                                      boolean isDark, Palette p, float den) {
         int current = isDark ? GlassConfig.darkColor : GlassConfig.lightColor;
-        for (int i = 0; i < swatches.length; i++) {
-            GradientDrawable gd = new GradientDrawable();
-            gd.setColor(presets[i]);
-            boolean selected =
-                    (presets[i] & 0xFFFFFF) == (current & 0xFFFFFF);
-            gd.setStroke(Math.round(selected ? 4f : 1f),
-                    selected ? 0xFF2196F3 : 0x44000000);
-            swatches[i].setBackground(gd);
+        for (int i = 0; i < rings.length; i++) {
+            boolean selected = (presets[i] & 0xFFFFFF) == (current & 0xFFFFFF);
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            ring.setColor(Color.TRANSPARENT);
+            ring.setStroke(dp(den, 2), selected ? p.accent : Color.TRANSPARENT);
+            rings[i].setBackground(ring);
         }
+    }
+
+    private static View grabber(Context ctx, Palette p, float den) {
+        View bar = new View(ctx);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setCornerRadius(dp(den, 2));
+        gd.setColor(p.grabber);
+        bar.setBackground(gd);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                dp(den, 36), dp(den, 4));
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        lp.topMargin = dp(den, 6);
+        lp.bottomMargin = dp(den, 10);
+        bar.setLayoutParams(lp);
+        return bar;
+    }
+
+    private static View header(Context ctx, Palette p, float den,
+                               final Dialog dlg) {
+        FrameLayout head = new FrameLayout(ctx);
+        head.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 12));
+
+        TextView title = new TextView(ctx);
+        title.setText("液态玻璃设置");
+        title.setTextSize(17f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(p.textPrimary);
+        head.addView(title, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+        TextView done = new TextView(ctx);
+        done.setText("完成");
+        done.setTextSize(15f);
+        done.setTextColor(p.accent);
+        done.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dlg.dismiss();
+            }
+        });
+        head.addView(done, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.CENTER_VERTICAL));
+        return head;
+    }
+
+    private static TextView sectionLabel(Context ctx, String text, Palette p,
+                                         float den) {
+        TextView tv = new TextView(ctx);
+        tv.setText(text);
+        tv.setTextSize(12f);
+        tv.setTextColor(p.textSecondary);
+        tv.setPadding(dp(den, 4), dp(den, 18), 0, dp(den, 8));
+        return tv;
+    }
+
+    private static LinearLayout card(Context ctx, Palette p, float den) {
+        LinearLayout box = new LinearLayout(ctx);
+        box.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setCornerRadius(dp(den, 12));
+        gd.setColor(p.card);
+        box.setBackground(gd);
+        return box;
+    }
+
+    private static View divider(Context ctx, Palette p, float den) {
+        View line = new View(ctx);
+        line.setBackgroundColor(p.divider);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(den, 0.5f)));
+        lp.leftMargin = dp(den, 16);
+        line.setLayoutParams(lp);
+        return line;
+    }
+
+    private static Drawable clickable(Palette p, int radius, int fill) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setCornerRadius(radius);
+        gd.setColor(fill);
+        return new RippleDrawable(ColorStateList.valueOf(p.ripple), gd, null);
+    }
+
+    private static GradientDrawable sheetBackground(Palette p, float den) {
+        float r = dp(den, 18);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(p.sheet);
+        gd.setCornerRadii(new float[]{0f, 0f, 0f, 0f, r, r, r, r});
+        return gd;
+    }
+
+    private static int statusInset(Activity act) {
+        try {
+            WindowInsets insets =
+                    act.getWindow().getDecorView().getRootWindowInsets();
+            if (insets == null) {
+                return 0;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                return insets.getInsets(WindowInsets.Type.statusBars()).top;
+            }
+            return insets.getSystemWindowInsetTop();
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private static boolean isNight(Activity act) {
+        int mode = act.getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK;
+        return mode == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private static int dp(float den, float value) {
+        return Math.round(value * den);
+    }
+
+    private static String heightText(int dp) {
+        return dp <= 0 ? "自适应" : dp + "dp";
     }
 
     private static void setPreset(boolean dark, int color) {
@@ -279,11 +534,59 @@ final class SettingsDialog {
 
     private static String currentOpacityText(boolean dark) {
         int pct = dark ? GlassConfig.darkAlphaPct : GlassConfig.lightAlphaPct;
-        return "不透明度：" + pct + "%";
+        return pct + "%";
     }
 
-    private static void persistAndRefresh(android.content.Context ctx) {
+    private static void persistAndRefresh(Context ctx) {
         GlassConfig.save(ctx);
         LiquidGlassInstaller.refreshGlass();
+    }
+
+    /** Heybox-flavoured day/night palette for the sheet chrome. */
+    private static final class Palette {
+        final boolean night;
+        final int sheet;
+        final int card;
+        final int divider;
+        final int hairline;
+        final int textPrimary;
+        final int textSecondary;
+        final int accent;
+        final int danger;
+        final int grabber;
+        final int ripple;
+        final int trackOff;
+        final int thumbOff;
+
+        Palette(boolean night) {
+            this.night = night;
+            if (night) {
+                sheet = 0xFF1A1B1F;
+                card = 0xFF25262B;
+                divider = 0xFF32333A;
+                hairline = 0x33FFFFFF;
+                textPrimary = 0xFFECEDEF;
+                textSecondary = 0xFF8B9099;
+                accent = ACCENT_NIGHT;
+                danger = 0xFFFF6B6B;
+                grabber = 0xFF3C3D44;
+                ripple = 0x1FFFFFFF;
+                trackOff = 0xFF4A4B52;
+                thumbOff = 0xFFBFC2C7;
+            } else {
+                sheet = 0xFFFFFFFF;
+                card = 0xFFF6F7F9;
+                divider = 0xFFEBECEF;
+                hairline = 0x1F000000;
+                textPrimary = 0xFF1A1B1F;
+                textSecondary = 0xFF8A8F99;
+                accent = ACCENT_DAY;
+                danger = 0xFFF5525B;
+                grabber = 0xFFDBDDE1;
+                ripple = 0x14000000;
+                trackOff = 0xFFC9CCD2;
+                thumbOff = 0xFFFFFFFF;
+            }
+        }
     }
 }
