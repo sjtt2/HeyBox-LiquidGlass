@@ -111,6 +111,7 @@ final class LiquidGlassInstaller {
                 ? root.indexOfChild(videoFull)
                 : root.getChildCount();
         root.addView(host, insertAt, hostLp);
+        sHostRef = host;
 
         FrameLayout.LayoutParams barFlp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -172,6 +173,7 @@ final class LiquidGlassInstaller {
                         if (!sTabBarActive) {
                             setupTabPopAnimation(bar);
                         }
+                        InWindowTipWatcher.start(activity);
                         HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
                                 "liquid glass installed: hostW=" + host.getWidth()
                                         + " hostH=" + host.getHeight()
@@ -972,6 +974,14 @@ final class LiquidGlassInstaller {
 
     static int dbgTintCalls() {
         return sDbgTintCalls;
+    }
+
+    static View activeGlassHost() {
+        ViewGroup host = sHostRef;
+        if (host == null || !host.isAttachedToWindow() || host.getHeight() <= 0) {
+            return null;
+        }
+        return host;
     }
 
     static int dbgLumWrites() {

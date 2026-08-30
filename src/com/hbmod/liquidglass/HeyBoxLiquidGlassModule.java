@@ -97,6 +97,7 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
         } catch (Throwable t) {
             logErr("install hook failed", t);
         }
+        BottomToastLifter.install();
     }
 
     @Override
