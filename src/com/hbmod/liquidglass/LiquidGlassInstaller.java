@@ -356,6 +356,8 @@ final class LiquidGlassInstaller {
             GlassConfig.load(activity);
             sHostRef = host;
             sDensity = host.getResources().getDisplayMetrics().density;
+            sRadioBarRef = new java.lang.ref.WeakReference<>(bar);
+            sContentViewRef = new java.lang.ref.WeakReference<>(content);
             installTitleBarEntry(activity);
             // tab-bar mode: offset 0 must be FLUSH to the physical screen
             // bottom, so strip the navigation-inset padding that the generic
@@ -501,6 +503,32 @@ final class LiquidGlassInstaller {
             }
             final View centerRef = centerHost;
             sCenterRefStatic = centerHost;
+            sMidTabRef = new java.lang.ref.WeakReference<>(
+                    midTab != null ? midTab : centerHost);
+            if (midTab != null) {
+                midTab.getViewTreeObserver().addOnPreDrawListener(
+                        new android.view.ViewTreeObserver.OnPreDrawListener() {
+                            @Override
+                            public boolean onPreDraw() {
+                                try {
+                                    if (sPlusHidden) {
+                                        if (midTab.getVisibility()
+                                                != View.GONE) {
+                                            midTab.setVisibility(View.GONE);
+                                        }
+                                    } else {
+                                        if (midTab.getVisibility()
+                                                != View.VISIBLE) {
+                                            midTab.setVisibility(View.VISIBLE);
+                                        }
+                                        restoreChildren(midTab);
+                                    }
+                                } catch (Throwable ignored) {
+                                }
+                                return true;
+                            }
+                        });
+            }
 
             // keep red-dot tips above everything else
             if (tips != null && tips.getParent() == host) {
@@ -512,6 +540,7 @@ final class LiquidGlassInstaller {
             // the tab bar has been laid out
             placeCenterNow(host, tabBar, centerRef, 0);
             applyBarGeometry();
+            syncPlusButton(bar, tabBar);
 
             // Label colors follow the REAL backdrop via a standalone luminance
             // meter (library's own class, decoupled from its view pipeline).
@@ -606,6 +635,7 @@ final class LiquidGlassInstaller {
 
             // app -> bar: extend the existing checked-listener wrapper
             setupTabSelectionSync(bar, tabBar, visibleButtons);
+            startTabVisibilitySync(bar, tabBar, visibleButtons, repeatRefreshTabs);
 
             // uiMode push seeds the initial state only; after the luminance
             // meter warms up it owns chrome colors (per-backdrop adaptation).
@@ -713,7 +743,7 @@ final class LiquidGlassInstaller {
      * Wraps the RadioGroup's existing OnCheckedChangeListener (via reflection)
      * so programmatic/checked changes also drive the glass droplet.
      */
-    private static void insertCenterGap(Activity activity, ViewGroup tabBar) {
+    private static void insertCenterGap(Context context, ViewGroup tabBar) {
         try {
             if (tabBar.getChildCount() == 0) {
                 return;
@@ -727,7 +757,7 @@ final class LiquidGlassInstaller {
             if (count < 2) {
                 return;
             }
-            android.widget.Space spacer = new android.widget.Space(activity);
+            android.widget.Space spacer = new android.widget.Space(context);
             android.widget.LinearLayout.LayoutParams lp =
                     new android.widget.LinearLayout.LayoutParams(0,
                             ViewGroup.LayoutParams.MATCH_PARENT, CENTER_GAP_WEIGHT);
@@ -740,7 +770,7 @@ final class LiquidGlassInstaller {
     /** Places the center button host over the spacer column (retryable). */
     private static void placeCenterNow(ViewGroup host, ViewGroup tabBar,
                                        View center, int attempt) {
-        if (center == null || attempt > 10) {
+        if (center == null || sPlusHidden || sCircleMode || attempt > 10) {
             return;
         }
         try {
@@ -762,6 +792,13 @@ final class LiquidGlassInstaller {
                 return;
             }
             int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
+            if (center.getWidth() == spacer.getWidth()
+                    && center.getHeight() == tabBar.getHeight()
+                    && center.getLeft() == left
+                    && center.getTop() == tabBar.getTop()
+                    && center.getVisibility() == View.VISIBLE) {
+                return;
+            }
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     spacer.getWidth(), tabBar.getHeight(),
                     android.view.Gravity.TOP | android.view.Gravity.START);
@@ -803,8 +840,7 @@ final class LiquidGlassInstaller {
     }
 
     /** Applies user height/offset config to the live bar (settings dialog). */
-    static void applyBarGeometry() {
-        try {
+    static void applyBarGeometry() {        try {
             View barV = sTabBarRef.get();
             ViewGroup host = sHostRef;
             View center = sCenterRefStatic;
@@ -829,13 +865,404 @@ final class LiquidGlassInstaller {
                     host.getPaddingRight(), sBasePadBottom
                             + Math.round(off * den));
 
+            applyTabWidths();
+
             host.requestLayout();
             final ViewGroup h2 = host;
             final ViewGroup b2 = (ViewGroup) barV;
             host.post(() -> placeCenterNow(h2, b2, center, 0));
+            android.widget.RadioGroup radio = sRadioBarRef.get();
+            if (radio != null
+                    && barV instanceof com.example.liquidglass.LiquidGlassTabBar) {
+                applyBarMode(radio,
+                        (com.example.liquidglass.LiquidGlassTabBar) barV);
+            }
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("applyBarGeometry failed", t);
         }
+    }
+
+    private static void applyTabWidths() {
+        try {
+            View barV = sTabBarRef.get();
+            if (!(barV instanceof ViewGroup)
+                    || ((ViewGroup) barV).getChildCount() == 0
+                    || !(((ViewGroup) barV).getChildAt(0) instanceof ViewGroup)) {
+                return;
+            }
+            ViewGroup row = (ViewGroup) ((ViewGroup) barV).getChildAt(0);
+            int tabs = 0;
+            for (int i = 0; i < row.getChildCount(); i++) {
+                if (row.getChildAt(i) instanceof android.widget.LinearLayout) {
+                    tabs++;
+                }
+            }
+            if (tabs == 0) {
+                return;
+            }
+            float f = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
+            float gap = Math.max(0.3f, (tabs + CENTER_GAP_WEIGHT) / f - tabs);
+            for (int i = 0; i < row.getChildCount(); i++) {
+                View c = row.getChildAt(i);
+                if (!(c.getLayoutParams()
+                        instanceof android.widget.LinearLayout.LayoutParams)) {
+                    continue;
+                }
+                android.widget.LinearLayout.LayoutParams lp =
+                        (android.widget.LinearLayout.LayoutParams) c.getLayoutParams();
+                float w = c instanceof android.widget.Space ? gap : f;
+                if (Math.abs(lp.weight - w) > 0.001f) {
+                    lp.weight = w;
+                    c.setLayoutParams(lp);
+                }
+            }
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("apply tab widths failed", t);
+        }
+    }
+
+    private static void startTabVisibilitySync(
+            final android.widget.RadioGroup bar,
+            final com.example.liquidglass.LiquidGlassTabBar tabBar,
+            final java.util.List<android.widget.RadioButton> buttons,
+            final java.util.List<Boolean> refreshFlags) {
+        bar.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean changed = bar.isAttachedToWindow()
+                            && syncTabSet(bar, tabBar, buttons, refreshFlags);
+                    if (bar.isAttachedToWindow()
+                            && syncPlusButton(bar, tabBar) && !changed) {
+                        HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
+                                "center gap toggled by plus visibility");
+                    }
+                } catch (Throwable t) {
+                    HeyBoxLiquidGlassModule.logErr("tab visibility sync failed", t);
+                }
+                bar.postDelayed(this, 500L);
+            }
+        }, 1500L);
+    }
+
+    private static boolean syncPlusButton(android.widget.RadioGroup bar,
+            com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        return applyBarMode(bar, tabBar);
+    }
+
+    private static boolean applyBarMode(android.widget.RadioGroup bar,
+            com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        View barV = sTabBarRef.get();
+        ViewGroup host = sHostRef;
+        View center = sCenterRefStatic;
+        View mid = sMidTabRef == null ? null : sMidTabRef.get();
+        if (barV == null || host == null || center == null) {
+            return false;
+        }
+        int visibleTabs = 0;
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View c = bar.getChildAt(i);
+            if (c instanceof android.widget.RadioButton
+                    && c.getVisibility() == View.VISIBLE) {
+                visibleTabs++;
+            }
+        }
+        if (visibleTabs == sLastTabs) {
+            sStableTabs = visibleTabs;
+        }
+        sLastTabs = visibleTabs;
+        int stableTabs = sStableTabs >= 0 ? sStableTabs : visibleTabs;
+        boolean bhHideAdd = betterHeyboxHideAdd(tabBar.getContext());
+        boolean circle;
+        boolean wantHidden;
+        if (bhHideAdd) {
+            circle = false;
+            wantHidden = true;
+        } else {
+            int mode = GlassConfig.barLayoutMode;
+            if (mode == 0) {
+                mode = stableTabs % 2 == 1 ? 2 : 1;
+            }
+            circle = mode == 2;
+            wantHidden = !circle && (stableTabs % 2 == 1 || stableTabs == 0);
+        }
+        sCircleMode = circle;
+        boolean changed = false;
+        if (mid != null) {
+            boolean hiddenNow = mid.getVisibility() == View.GONE
+                    || allChildrenGone(mid);
+            if (circle || !wantHidden) {
+                if (hiddenNow) {
+                    mid.setVisibility(View.VISIBLE);
+                    restoreChildren(mid);
+                    changed = true;
+                }
+            } else if (!hiddenNow) {
+                mid.setVisibility(View.GONE);
+                changed = true;
+            }
+        }
+        sPlusHidden = wantHidden;
+        if (tabBar.getChildCount() == 0
+                || !(tabBar.getChildAt(0) instanceof ViewGroup)) {
+            return true;
+        }
+        ViewGroup row = (ViewGroup) tabBar.getChildAt(0);
+        boolean hasGap = false;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            if (row.getChildAt(i) instanceof android.widget.Space) {
+                hasGap = true;
+                break;
+            }
+        }
+        boolean wantGap = !circle && !wantHidden;
+        if (wantGap && !hasGap) {
+            insertCenterGap(tabBar.getContext(), tabBar);
+            changed = true;
+        } else if (!wantGap && hasGap) {
+            for (int i = row.getChildCount() - 1; i >= 0; i--) {
+                if (row.getChildAt(i) instanceof android.widget.Space) {
+                    row.removeViewAt(i);
+                }
+            }
+            changed = true;
+        }
+        applyTabWidths();
+        float den = sDensity > 0 ? sDensity : 3f;
+        int barH = barV.getHeight();
+        int circleSize = barH > 0 ? barH : Math.round(56 * den);
+        int circleGap = Math.round(8 * den);
+        if (barV.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams blp =
+                    (FrameLayout.LayoutParams) barV.getLayoutParams();
+            int wantMargin = circle ? circleSize + circleGap : 0;
+            if (blp.rightMargin != wantMargin) {
+                blp.rightMargin = wantMargin;
+                barV.setLayoutParams(blp);
+                changed = true;
+            }
+        }
+        if (circle) {
+            View glass = sGlassCircleRef == null ? null : sGlassCircleRef.get();
+            if (glass != null && glass.getParent() != center) {
+                glass = null;
+            }
+            if (glass == null && center instanceof ViewGroup) {
+                glass = buildGlassCircle(tabBar.getContext());
+                if (glass != null) {
+                    sGlassCircleRef = new java.lang.ref.WeakReference<>(glass);
+                    ((ViewGroup) center).addView(glass, 0,
+                            new FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT));
+                    changed = true;
+                }
+            }
+            if (glass != null && glass.getVisibility() != View.VISIBLE) {
+                glass.setVisibility(View.VISIBLE);
+                changed = true;
+            }
+            if (center.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams clp =
+                        (FrameLayout.LayoutParams) center.getLayoutParams();
+                int wantGravity = android.view.Gravity.END
+                        | android.view.Gravity.CENTER_VERTICAL;
+                if (clp.width != circleSize || clp.height != circleSize
+                        || clp.gravity != wantGravity || clp.leftMargin != 0
+                        || clp.topMargin != 0 || clp.rightMargin != 0
+                        || clp.bottomMargin != 0) {
+                    clp.width = circleSize;
+                    clp.height = circleSize;
+                    clp.gravity = wantGravity;
+                    clp.leftMargin = 0;
+                    clp.topMargin = 0;
+                    clp.rightMargin = 0;
+                    clp.bottomMargin = 0;
+                    center.setLayoutParams(clp);
+                    changed = true;
+                }
+            }
+            if (center.getVisibility() != View.VISIBLE) {
+                center.setVisibility(View.VISIBLE);
+                changed = true;
+            }
+        } else {
+            View glass = sGlassCircleRef == null ? null : sGlassCircleRef.get();
+            if (glass != null && glass.getVisibility() != View.GONE) {
+                glass.setVisibility(View.GONE);
+                changed = true;
+            }
+            int wantVis = wantHidden ? View.GONE : View.VISIBLE;
+            if (center.getVisibility() != wantVis) {
+                center.setVisibility(wantVis);
+                changed = true;
+            }
+        }
+        if (changed) {
+            row.requestLayout();
+            host.requestLayout();
+        }
+        if (!circle) {
+            final ViewGroup h2 = host;
+            final View c2 = center;
+            final com.example.liquidglass.LiquidGlassTabBar t2 = tabBar;
+            host.post(() -> placeCenterNow(h2, t2, c2, 0));
+        }
+        return changed;
+    }
+
+    private static final String BH_PREFS = "betterheybox";
+    private static final String BH_PENDING_PREFS = "betterheybox_pending";
+    private static final String BH_KEY_HIDE_ADD = "hide_add";
+
+    /** Mirrors BetterHeybox's own three-tier key resolution so the two
+     *  modules agree on whether the plus button is explicitly hidden. */
+    private static boolean betterHeyboxHideAdd(Context context) {
+        try {
+            android.content.SharedPreferences pending = context
+                    .getSharedPreferences(BH_PENDING_PREFS, 0);
+            if (pending != null && pending.contains(BH_KEY_HIDE_ADD)) {
+                return pending.getBoolean(BH_KEY_HIDE_ADD, false);
+            }
+            android.content.SharedPreferences local = context
+                    .getSharedPreferences(BH_PREFS, 0);
+            if (local != null && local.contains(BH_KEY_HIDE_ADD)) {
+                return local.getBoolean(BH_KEY_HIDE_ADD, false);
+            }
+            android.content.SharedPreferences remote =
+                    HeyBoxLiquidGlassModule.remotePrefs(BH_PREFS);
+            if (remote != null) {
+                return remote.getBoolean(BH_KEY_HIDE_ADD, false);
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private static View buildGlassCircle(Context context) {        try {
+            View content = sContentViewRef == null ? null : sContentViewRef.get();
+            com.example.liquidglass.LiquidGlassView glass =
+                    new com.example.liquidglass.LiquidGlassView(context, null, 0);
+            glass.setCornerRadius(999f);
+            glass.setEnableDynamicBackground(true);
+            if (content != null) {
+                glass.setBackdropSource(content);
+            }
+            glass.setMaterial(com.example.liquidglass.GlassMaterial.REGULAR);
+            float den = sDensity > 0 ? sDensity : 3f;
+            glass.setRefractionHeight(28f * den);
+            glass.setBevelWidth(10f * den);
+            glass.setDispersionStrength(0.12f);
+            glass.setEnableSensorHighlight(true);
+            glass.setEnableAdaptiveTint(false);
+            return glass;
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("glass circle build failed", t);
+            return null;
+        }
+    }
+
+    private static boolean allChildrenGone(View view) {
+        if (!(view instanceof ViewGroup)) {
+            return false;
+        }
+        ViewGroup group = (ViewGroup) view;
+        if (group.getChildCount() == 0) {
+            return false;
+        }
+        for (int i = 0; i < group.getChildCount(); i++) {
+            if (group.getChildAt(i).getVisibility() != View.GONE) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void restoreChildren(View view) {
+        if (!(view instanceof ViewGroup)) {
+            return;
+        }
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View c = group.getChildAt(i);
+            if (c.getVisibility() == View.GONE) {
+                c.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private static boolean syncTabSet(android.widget.RadioGroup bar,
+            com.example.liquidglass.LiquidGlassTabBar tabBar,
+            java.util.List<android.widget.RadioButton> buttons,
+            java.util.List<Boolean> refreshFlags) {
+        java.util.List<android.widget.RadioButton> now = new java.util.ArrayList<>();
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View c = bar.getChildAt(i);
+            if (c instanceof android.widget.RadioButton
+                    && c.getVisibility() == View.VISIBLE) {
+                now.add((android.widget.RadioButton) c);
+            }
+        }
+        StringBuilder sigBuilder = new StringBuilder();
+        for (android.widget.RadioButton rb : now) {
+            sigBuilder.append(rb.getId()).append(',');
+        }
+        String sig = sigBuilder.toString();
+        if (!sig.equals(sLastRadioSig)) {
+            sLastRadioSig = sig;
+            return false;
+        }
+        boolean same = !now.isEmpty() && now.size() == buttons.size();
+        if (same) {
+            for (int i = 0; i < now.size(); i++) {
+                if (now.get(i) != buttons.get(i)) {
+                    same = false;
+                    break;
+                }
+            }
+        }
+        if (same) {
+            return false;
+        }
+        java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
+                new java.util.ArrayList<>();
+        java.util.List<Boolean> refresh = new java.util.ArrayList<>();
+        for (android.widget.RadioButton rb : now) {
+            CharSequence title = rb.getText();
+            Drawable icon = rb.getCompoundDrawables()[1];
+            if (icon != null) {
+                icon.mutate();
+            }
+            items.add(new com.example.liquidglass.LiquidGlassTabBar.TabItem(
+                    title, icon));
+            refresh.add(isRepeatRefreshTab(title));
+        }
+        buttons.clear();
+        buttons.addAll(now);
+        refreshFlags.clear();
+        refreshFlags.addAll(refresh);
+        tabBar.setTabs(items);
+        if (!sPlusHidden) {
+            insertCenterGap(tabBar.getContext(), tabBar);
+        }
+        applyTabWidths();
+        int checked = bar.getCheckedRadioButtonId();
+        for (int i = 0; i < now.size(); i++) {
+            if (now.get(i).getId() == checked) {
+                tabBar.setSelectedIndex(i);
+                break;
+            }
+        }
+        applyTabBarOverLight(tabBar, sChromeLight);
+        tabBar.requestLayout();
+        syncPlusButton(bar, tabBar);
+        ViewGroup host = sHostRef;
+        if (host != null) {
+            final ViewGroup h2 = host;
+            final com.example.liquidglass.LiquidGlassTabBar t2 = tabBar;
+            host.post(() -> placeCenterNow(h2, t2, sCenterRefStatic, 0));
+        }
+        return true;
     }
 
     private static boolean isRepeatRefreshTab(CharSequence title) {
@@ -966,6 +1393,21 @@ final class LiquidGlassInstaller {
     private static volatile boolean sChromeForced;
     private static volatile ViewGroup sHostRef;
     private static volatile View sCenterRefStatic;
+    private static final java.lang.ref.WeakReference<View> EMPTY_MID_REF =
+            new java.lang.ref.WeakReference<>(null);
+    private static volatile java.lang.ref.WeakReference<View> sMidTabRef =
+            EMPTY_MID_REF;
+    private static volatile boolean sPlusHidden;
+    private static final java.lang.ref.WeakReference<android.widget.RadioGroup>
+            EMPTY_RADIO_REF = new java.lang.ref.WeakReference<>(null);
+    private static volatile java.lang.ref.WeakReference<android.widget.RadioGroup>
+            sRadioBarRef = EMPTY_RADIO_REF;
+    private static volatile java.lang.ref.WeakReference<View> sGlassCircleRef;
+    private static volatile java.lang.ref.WeakReference<View> sContentViewRef;
+    private static volatile boolean sCircleMode;
+    private static volatile int sLastTabs = -1;
+    private static volatile int sStableTabs = -1;
+    private static volatile String sLastRadioSig = "";
     private static volatile float sDensity;
     private static int sBasePadBottom;
     private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
@@ -1057,7 +1499,7 @@ final class LiquidGlassInstaller {
 
     /** 长按“我”页右上角齿轮图标打开液态玻璃设置（入口之一）。 */
     private static volatile boolean sTitleHookInstalled;
-    private static final java.util.Map<View, Boolean> sGlassEntries =
+    private static final java.util.Map<View, Boolean> sGearPredraw =
             java.util.Collections.synchronizedMap(
                     new java.util.WeakHashMap<View, Boolean>());
 
@@ -1086,16 +1528,32 @@ final class LiquidGlassInstaller {
             HeyBoxLiquidGlassModule.hookExecutable(g, chain -> {
                 Object r = chain.proceed();
                 try {
-                    if (r instanceof View && !sGlassEntries.containsKey(r)) {
+                    if (r instanceof View) {
                         View icon = (View) r;
-                        sGlassEntries.put(icon, Boolean.TRUE);
                         android.content.Context cx = icon.getContext();
                         if (cx instanceof Activity) {
                             final Activity a = (Activity) cx;
-                            icon.setOnLongClickListener(v -> {
+                            final View.OnLongClickListener ours = v -> {
                                 SettingsDialog.show(a);
                                 return true;
-                            });
+                            };
+                            icon.setOnLongClickListener(ours);
+                            if (!sGearPredraw.containsKey(icon)) {
+                                sGearPredraw.put(icon, Boolean.TRUE);
+                                icon.getViewTreeObserver()
+                                        .addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                                            @Override
+                                            public boolean onPreDraw() {
+                                                try {
+                                                    if (icon.getVisibility() == View.VISIBLE) {
+                                                        icon.setOnLongClickListener(ours);
+                                                    }
+                                                } catch (Throwable ignored) {
+                                                }
+                                                return true;
+                                            }
+                                        });
+                            }
                         }
                     }
                 } catch (Throwable ignored) {

@@ -116,4 +116,16 @@ public class HeyBoxLiquidGlassModule extends XposedModule {
     static void logErr(String msg, Throwable t) {
         android.util.Log.e(TAG, msg, t);
     }
+
+    static android.content.SharedPreferences remotePrefs(String name) {
+        HeyBoxLiquidGlassModule self = sSelf;
+        if (self == null) {
+            return null;
+        }
+        try {
+            return self.getRemotePreferences(name);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 }

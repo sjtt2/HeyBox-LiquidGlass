@@ -181,7 +181,7 @@ final class SettingsDialog {
 
         box.addView(sliderRow(act, "玻璃条高度", heightText(GlassConfig.barHeightDp),
                 48, Math.max(0, Math.min(GlassConfig.barHeightDp - 51, 48)),
-                p, den, new OnSlide() {
+                0, p, den, new OnSlide() {
                     @Override
                     public String onSlide(int progress) {
                         GlassConfig.barHeightDp = progress == 0 ? 0 : progress + 51;
@@ -193,7 +193,7 @@ final class SettingsDialog {
         box.addView(sliderRow(act, "距屏幕底部",
                 GlassConfig.barOffsetDp + "dp", 40,
                 Math.max(0, Math.min(GlassConfig.barOffsetDp, 40)),
-                p, den, new OnSlide() {
+                16, p, den, new OnSlide() {
                     @Override
                     public String onSlide(int progress) {
                         GlassConfig.barOffsetDp = progress;
@@ -201,6 +201,20 @@ final class SettingsDialog {
                         return progress + "dp";
                     }
                 }));
+        box.addView(divider(act, p, den));
+        box.addView(sliderRow(act, "Tab 宽度",
+                GlassConfig.tabWidthPct + "%", 100,
+                Math.max(0, Math.min(GlassConfig.tabWidthPct - 50, 100)),
+                50, p, den, new OnSlide() {
+                    @Override
+                    public String onSlide(int progress) {
+                        GlassConfig.tabWidthPct = progress + 50;
+                        persistAndRefresh(act);
+                        return GlassConfig.tabWidthPct + "%";
+                    }
+                }));
+        box.addView(divider(act, p, den));
+        box.addView(modeRow(act, p, den));
         return box;
     }
 
@@ -255,7 +269,8 @@ final class SettingsDialog {
 
         card.addView(divider(act, p, den));
         card.addView(sliderRow(act, "不透明度", currentOpacityText(isDark), 85,
-                opacityToProgress(isDark), p, den, new OnSlide() {
+                opacityToProgress(isDark), isDark ? 46 : 54, p, den,
+                new OnSlide() {
                     @Override
                     public String onSlide(int progress) {
                         setOpacity(isDark, progress + 10);
@@ -263,6 +278,67 @@ final class SettingsDialog {
                         return currentOpacityText(isDark);
                     }
                 }));
+    }
+
+    private static final int[] MODE_VALUES = {1, 2, 0};
+
+    private static View modeRow(final Activity act, final Palette p,
+                                final float den) {
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 14));
+        TextView label = new TextView(act);
+        label.setText("底栏形态");
+        label.setTextSize(15f);
+        label.setTextColor(p.textPrimary);
+        row.addView(label);
+        LinearLayout chips = new LinearLayout(act);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, dp(den, 10), 0, 0);
+        final String[] names = {"经典居中", "右侧圆钮", "自动"};
+        for (int i = 0; i < names.length; i++) {
+            final int idx = i;
+            TextView chip = new TextView(act);
+            chip.setText(names[i]);
+            chip.setTextSize(13f);
+            chip.setTextColor(p.textPrimary);
+            chip.setPadding(dp(den, 12), dp(den, 6), dp(den, 12), dp(den, 6));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            cp.rightMargin = dp(den, 8);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    GlassConfig.barLayoutMode = MODE_VALUES[idx];
+                    persistAndRefresh(act);
+                    markModes(chips, p, den);
+                }
+            });
+            chips.addView(chip, cp);
+        }
+        markModes(chips, p, den);
+        row.addView(chips);
+        TextView hint = new TextView(act);
+        hint.setText("自动：tab 为奇数时自动切到右侧圆钮形态");
+        hint.setTextSize(12f);
+        hint.setTextColor(p.textSecondary);
+        hint.setPadding(0, dp(den, 6), 0, 0);
+        row.addView(hint);
+        return row;
+    }
+
+    private static void markModes(LinearLayout chips, Palette p, float den) {
+        for (int i = 0; i < chips.getChildCount(); i++) {
+            View c = chips.getChildAt(i);
+            GradientDrawable gd = new GradientDrawable();
+            gd.setCornerRadius(dp(den, 14));
+            boolean selected = MODE_VALUES[i] == GlassConfig.barLayoutMode;
+            gd.setColor(selected ? (p.night ? 0x334A93FF : 0x142B7FFF)
+                    : Color.TRANSPARENT);
+            gd.setStroke(dp(den, 1), selected ? p.accent : p.hairline);
+            c.setBackground(gd);
+        }
     }
 
     private interface OnToggle {
@@ -326,8 +402,8 @@ final class SettingsDialog {
     }
 
     private static View sliderRow(Context ctx, String title, String value,
-                                  int max, int progress, Palette p, float den,
-                                  final OnSlide cb) {
+                                  int max, int progress, final int defProgress,
+                                  Palette p, float den, final OnSlide cb) {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 10));
@@ -346,9 +422,26 @@ final class SettingsDialog {
         v.setTextSize(14f);
         v.setTextColor(p.accent);
         head.addView(v);
+
+        TextView reset = new TextView(ctx);
+        reset.setText("重置");
+        reset.setTextSize(11f);
+        reset.setTextColor(p.textSecondary);
+        reset.setPadding(dp(den, 8), dp(den, 3), dp(den, 8), dp(den, 3));
+        GradientDrawable gd = new GradientDrawable();
+        gd.setCornerRadius(dp(den, 10));
+        gd.setColor(Color.TRANSPARENT);
+        gd.setStroke(dp(den, 1), p.hairline);
+        reset.setBackground(gd);
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        rp.leftMargin = dp(den, 10);
+        reset.setLayoutParams(rp);
+        head.addView(reset);
         row.addView(head);
 
-        SeekBar seek = new SeekBar(ctx);
+        final SeekBar seek = new SeekBar(ctx);
         seek.setMax(max);
         seek.setProgress(progress);
         seek.setProgressTintList(ColorStateList.valueOf(p.accent));
@@ -374,6 +467,14 @@ final class SettingsDialog {
             }
         });
         row.addView(seek);
+
+        reset.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v2) {
+                v.setText(cb.onSlide(defProgress));
+                seek.setProgress(defProgress);
+            }
+        });
         return row;
     }
 

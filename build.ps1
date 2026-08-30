@@ -99,7 +99,7 @@ if (-not (Test-Path $ks)) {
     if ($LASTEXITCODE -ne 0) { throw 'keytool failed' }
 }
 # Release APK output: ../release/  (bump the version in the filename on release)
-$finalApk = Join-Path $proj '..\release\HeyBoxLiquidGlass-v1.3.6.apk'
+$finalApk = Join-Path $proj '..\release\HeyBoxLiquidGlass-v1.3.10-gear.apk'
 & java -cp (Join-Path $bt 'lib\apksigner.jar') com.android.apksigner.ApkSignerTool sign `
     --ks $ks --ks-pass pass:android --key-pass pass:android `
     --out $finalApk "$out\aligned.apk"

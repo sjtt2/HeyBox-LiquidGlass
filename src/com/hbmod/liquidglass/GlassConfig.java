@@ -21,6 +21,11 @@ final class GlassConfig {
     static volatile int barHeightDp = 0;
     /** extra distance between the glass pill and the screen bottom, dp */
     static volatile int barOffsetDp = 16;
+    /** tab item width scale, percent of the equal-split default (50-150) */
+    static volatile int tabWidthPct = 100;
+    /** bottom bar shape: 0 = auto (odd tabs -> circle), 1 = classic centered
+     *  plus, 2 = circular plus button on the right */
+    static volatile int barLayoutMode = 0;
 
     private GlassConfig() {
     }
@@ -49,6 +54,8 @@ final class GlassConfig {
             adaptiveChrome = p.getBoolean("adaptiveChrome", true);
             barHeightDp = p.getInt("barHeightDp", barHeightDp);
             barOffsetDp = p.getInt("barOffsetDp", barOffsetDp);
+            tabWidthPct = p.getInt("tabWidthPct", tabWidthPct);
+            barLayoutMode = p.getInt("barLayoutMode", barLayoutMode);
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("config load failed", t);
         }
@@ -66,6 +73,8 @@ final class GlassConfig {
             e.putBoolean("adaptiveChrome", adaptiveChrome);
             e.putInt("barHeightDp", barHeightDp);
             e.putInt("barOffsetDp", barOffsetDp);
+            e.putInt("tabWidthPct", tabWidthPct);
+            e.putInt("barLayoutMode", barLayoutMode);
             e.apply();
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("config save failed", t);
@@ -80,6 +89,8 @@ final class GlassConfig {
         adaptiveChrome = true;
         barHeightDp = 0;
         barOffsetDp = 16;
+        tabWidthPct = 100;
+        barLayoutMode = 0;
         immersiveGestureNavigation = true;
     }
 }
