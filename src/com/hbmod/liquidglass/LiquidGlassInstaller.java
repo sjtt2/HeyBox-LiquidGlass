@@ -195,6 +195,11 @@ final class LiquidGlassInstaller {
     private static final float FIT_TAB_MAX_WIDTH_DP = 96f;
     private static final float SELECTED_TAB_WEIGHT = 1.4f;
     private static final float OTHER_TAB_WEIGHT = 0.9f;
+    /** Width transitions borrow LiquidGlassTabBar's own droplet settle timing
+     *  (380ms / OvershootInterpolator(1.1)) so labels and droplet travel as
+     *  one system instead of two overlapping animations. */
+    private static final long FIT_ANIM_MS = 380L;
+    private static final float FIT_ANIM_TENSION = 1.1f;
     /** Set true to show the on-screen diagnosis HUD (test builds). */
     private static final boolean USE_DEBUG_HUD = false;
     private static volatile boolean sTabBarActive;
@@ -373,6 +378,7 @@ final class LiquidGlassInstaller {
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
             sTabBarRef = new java.lang.ref.WeakReference<>(tabBar);
+            resetWidthAnimState();
             float density = host.getResources().getDisplayMetrics().density;
 
             java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
@@ -928,6 +934,11 @@ final class LiquidGlassInstaller {
             }
             float f = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
             boolean fit = fitVisibleTabsEffective(tabs);
+            // Only the adaptive mode animates; the tab-width slider must stay
+            // instant or every drag tick would queue a 380ms wobble.
+            boolean glide = fit || sFitActive;
+            sFitActive = fit;
+            float[] before = glide ? captureTabCenters(row) : null;
             int selected = Math.max(0, Math.min(selectedIndex, tabs - 1));
             float gap = fit ? CENTER_GAP_WEIGHT
                     : Math.max(0.3f, (tabs + CENTER_GAP_WEIGHT) / f - tabs);
@@ -964,10 +975,240 @@ final class LiquidGlassInstaller {
                     + (hasGap ? CENTER_GAP_WEIGHT : 0f)
                     : 0f;
             changed |= applyFitBarWidth(barV, totalWeight, fit, f);
+            if (changed && before != null) {
+                scheduleTabGlide(row, before);
+            }
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("apply tab widths failed", t);
         }
         return changed;
+    }
+
+    /** A re-installed bar is a different view: drop any animation still
+     *  running against the old one, so its pending target cannot suppress the
+     *  first width applied to the new bar. */
+    private static void resetWidthAnimState() {
+        if (sTabShiftAnimator != null) {
+            sTabShiftAnimator.cancel();
+            sTabShiftAnimator = null;
+        }
+        if (sBarWidthAnimator != null) {
+            sBarWidthAnimator.cancel();
+            sBarWidthAnimator = null;
+        }
+        if (sDropletSizeAnimator != null) {
+            sDropletSizeAnimator.cancel();
+            sDropletSizeAnimator = null;
+        }
+        sBarTargetWidth = Integer.MIN_VALUE;
+        sBarTargetLeft = Integer.MIN_VALUE;
+        sBarTargetGravity = Integer.MIN_VALUE;
+        sFitActive = false;
+    }
+
+    /** `animateDropletTo` sizes the droplet to the incoming tab in one step
+     *  before it starts travelling, so the glass pops from the narrow width to
+     *  the wide one — the single most visible part of the change. The bar
+     *  leaves the size alone for the rest of the settle (`onLayout` only
+     *  re-syncs when its own animator is idle), so we can widen it ourselves
+     *  over the same beat. */
+    private static void scheduleDropletGrow(
+            final com.example.liquidglass.LiquidGlassTabBar tabBar,
+            final int fromWidth) {
+        try {
+            if (fromWidth <= 0) {
+                return;
+            }
+            final View droplet = findDroplet(tabBar);
+            if (droplet == null) {
+                return;
+            }
+            ViewTreeObserver vto = tabBar.getViewTreeObserver();
+            if (vto == null || !vto.isAlive()) {
+                return;
+            }
+            vto.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    ViewTreeObserver live = tabBar.getViewTreeObserver();
+                    if (live != null && live.isAlive()) {
+                        live.removeOnPreDrawListener(this);
+                    }
+                    // false: the start width is a layout property, so the
+                    // frame has to be re-run rather than drawn at the end size
+                    return !growDroplet(droplet, fromWidth);
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean growDroplet(View droplet, int fromWidth) {
+        try {
+            if (!(droplet.getLayoutParams() instanceof FrameLayout.LayoutParams)) {
+                return false;
+            }
+            final FrameLayout.LayoutParams lp =
+                    (FrameLayout.LayoutParams) droplet.getLayoutParams();
+            final int toWidth = lp.width;
+            if (toWidth <= 0 || Math.abs(toWidth - fromWidth) < 2) {
+                return false;
+            }
+            if (sDropletSizeAnimator != null) {
+                sDropletSizeAnimator.cancel();
+            }
+            final int startWidth = fromWidth;
+            lp.width = startWidth;
+            droplet.setLayoutParams(lp);
+            android.animation.ValueAnimator anim =
+                    android.animation.ValueAnimator.ofFloat(0f, 1f);
+            // lands just inside the bar's own 380ms settle, so the first
+            // layout after the settle finds the final width already in place
+            anim.setDuration(Math.max(0L, FIT_ANIM_MS - 40L));
+            anim.setInterpolator(
+                    new android.view.animation.DecelerateInterpolator(1.6f));
+            anim.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                lp.width = Math.round(startWidth + (toWidth - startWidth) * t);
+                droplet.setLayoutParams(lp);
+            });
+            final boolean[] cancelled = {false};
+            anim.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationCancel(android.animation.Animator a) {
+                    cancelled[0] = true;
+                }
+
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    if (cancelled[0]) {
+                        return;
+                    }
+                    lp.width = toWidth;
+                    droplet.setLayoutParams(lp);
+                }
+            });
+            sDropletSizeAnimator = anim;
+            anim.start();
+            return true;
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("droplet grow failed", t);
+            return false;
+        }
+    }
+
+    /** Snapshot of where each tab currently *appears* (layout position plus
+     *  any glide still in flight), so the layout change about to happen can be
+     *  replayed as motion. Null until the row has been laid out. */
+    private static float[] captureTabCenters(ViewGroup row) {
+        if (row.getWidth() <= 0) {
+            return null;
+        }
+        float[] centers = new float[row.getChildCount()];
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View c = row.getChildAt(i);
+            if (c.getWidth() <= 0) {
+                return null;
+            }
+            centers[i] = c.getLeft() + c.getWidth() / 2f + c.getTranslationX();
+        }
+        return centers;
+    }
+
+    /** Defers the glide to the pre-draw pass: the new weights are already in
+     *  place by then (the droplet needs the final layout to aim at), and
+     *  offsetting before the frame is drawn means no flash of the end state. */
+    private static void scheduleTabGlide(final ViewGroup row,
+            final float[] before) {
+        try {
+            ViewTreeObserver vto = row.getViewTreeObserver();
+            if (vto == null || !vto.isAlive()) {
+                return;
+            }
+            vto.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    ViewTreeObserver live = row.getViewTreeObserver();
+                    if (live != null && live.isAlive()) {
+                        live.removeOnPreDrawListener(this);
+                    }
+                    glideTabsFrom(row, before);
+                    return true;
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** A tab slot is transparent — all the user sees is the centred icon+label
+     *  stack. So the width change is animated by leaving the layout at its
+     *  final state (which `syncDroplet`/`animateDropletTo` read) and sliding
+     *  the content back to where it was, then home. */
+    private static void glideTabsFrom(ViewGroup row, float[] before) {
+        try {
+            if (before == null || row.getChildCount() != before.length) {
+                return;
+            }
+            if (sBarWidthAnimator != null && sBarWidthAnimator.isRunning()) {
+                // the pill is already animating its own real layout; the tabs
+                // ride along with it and must not be offset on top of that
+                return;
+            }
+            final View[] kids = new View[before.length];
+            final float[] shift = new float[before.length];
+            boolean any = false;
+            for (int i = 0; i < before.length; i++) {
+                View c = row.getChildAt(i);
+                if (c.getWidth() <= 0) {
+                    return;
+                }
+                kids[i] = c;
+                shift[i] = before[i] - (c.getLeft() + c.getWidth() / 2f);
+                any |= Math.abs(shift[i]) > 0.5f;
+            }
+            if (!any) {
+                return;
+            }
+            if (sTabShiftAnimator != null) {
+                sTabShiftAnimator.cancel();
+            }
+            for (int i = 0; i < kids.length; i++) {
+                kids[i].setTranslationX(shift[i]);
+            }
+            android.animation.ValueAnimator anim =
+                    android.animation.ValueAnimator.ofFloat(1f, 0f);
+            anim.setDuration(FIT_ANIM_MS);
+            anim.setInterpolator(
+                    new android.view.animation.OvershootInterpolator(
+                            FIT_ANIM_TENSION));
+            anim.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                for (int i = 0; i < kids.length; i++) {
+                    kids[i].setTranslationX(shift[i] * t);
+                }
+            });
+            final boolean[] cancelled = {false};
+            anim.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationCancel(android.animation.Animator a) {
+                    cancelled[0] = true;
+                }
+
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    if (cancelled[0]) {
+                        return;
+                    }
+                    for (View kid : kids) {
+                        kid.setTranslationX(0f);
+                    }
+                }
+            });
+            sTabShiftAnimator = anim;
+            anim.start();
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("tab glide failed", t);
+        }
     }
 
     private static boolean applyFitBarWidth(View barV, float totalWeight,
@@ -977,19 +1218,6 @@ final class LiquidGlassInstaller {
         }
         FrameLayout.LayoutParams lp =
                 (FrameLayout.LayoutParams) barV.getLayoutParams();
-        if (!fit) {
-            int gravity = android.view.Gravity.TOP
-                    | android.view.Gravity.FILL_HORIZONTAL;
-            if (lp.width == ViewGroup.LayoutParams.MATCH_PARENT
-                    && lp.gravity == gravity && lp.leftMargin == 0) {
-                return false;
-            }
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            lp.gravity = gravity;
-            lp.leftMargin = 0;
-            barV.setLayoutParams(lp);
-            return true;
-        }
         ViewGroup host = sHostRef;
         float den = sDensity > 0 ? sDensity
                 : barV.getResources().getDisplayMetrics().density;
@@ -999,6 +1227,11 @@ final class LiquidGlassInstaller {
                     - Math.round(20f * den);
         }
         int available = Math.max(0, hostWidth - lp.rightMargin);
+        if (!fit) {
+            return setBarWidth(barV, lp, ViewGroup.LayoutParams.MATCH_PARENT, 0,
+                    android.view.Gravity.TOP
+                            | android.view.Gravity.FILL_HORIZONTAL, available);
+        }
         if (available <= 0 || totalWeight <= 0f) {
             return false;
         }
@@ -1009,16 +1242,90 @@ final class LiquidGlassInstaller {
         int width = Math.min(available,
                 Math.round(totalWeight * perWeight) + Math.round(8f * den));
         int left = Math.max(0, (available - width) / 2);
-        int gravity = android.view.Gravity.TOP | android.view.Gravity.START;
-        if (lp.width == width && lp.gravity == gravity && lp.leftMargin == left) {
+        return setBarWidth(barV, lp, width, left,
+                android.view.Gravity.TOP | android.view.Gravity.START,
+                available);
+    }
+
+    /** The pill's own width is a visible edge, so unlike the tab slots it has
+     *  to be animated through real layout. Callers compare against the pending
+     *  target rather than the live params, so the 500ms visibility poll cannot
+     *  fight an animation that is already heading to the same place. */
+    private static boolean setBarWidth(View barV, FrameLayout.LayoutParams lp,
+            int width, int left, int gravity, int available) {
+        boolean animating = sBarWidthAnimator != null
+                && sBarWidthAnimator.isRunning();
+        if (animating && width == sBarTargetWidth && left == sBarTargetLeft
+                && gravity == sBarTargetGravity) {
             return false;
         }
-        lp.width = width;
-        lp.gravity = gravity;
-        lp.leftMargin = left;
-        barV.setLayoutParams(lp);
+        if (!animating && lp.width == width && lp.gravity == gravity
+                && lp.leftMargin == left) {
+            sBarTargetWidth = width;
+            sBarTargetLeft = left;
+            sBarTargetGravity = gravity;
+            return false;
+        }
+        sBarTargetWidth = width;
+        sBarTargetLeft = left;
+        sBarTargetGravity = gravity;
+        final int startWidth = barV.getWidth();
+        final int startLeft = lp.leftMargin;
+        int endPx = width == ViewGroup.LayoutParams.MATCH_PARENT
+                ? available : width;
+        if (animating) {
+            sBarWidthAnimator.cancel();
+        }
+        if (startWidth <= 0 || endPx <= 0 || startWidth == endPx) {
+            lp.width = width;
+            lp.leftMargin = left;
+            lp.gravity = gravity;
+            barV.setLayoutParams(lp);
+            return true;
+        }
+        final FrameLayout.LayoutParams flp = lp;
+        final View target = barV;
+        final int endWidth = endPx;
+        final int endLeft = left;
+        final int endGravity = gravity;
+        final int finalWidth = width;
+        // fixed width + FILL_HORIZONTAL would stretch back to full, so the
+        // pill is pinned to START for the duration and restored on end
+        flp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+        android.animation.ValueAnimator anim =
+                android.animation.ValueAnimator.ofFloat(0f, 1f);
+        anim.setDuration(FIT_ANIM_MS);
+        anim.setInterpolator(
+                new android.view.animation.DecelerateInterpolator(1.6f));
+        anim.addUpdateListener(a -> {
+            float t = (Float) a.getAnimatedValue();
+            flp.width = Math.round(startWidth + (endWidth - startWidth) * t);
+            flp.leftMargin = Math.round(startLeft + (endLeft - startLeft) * t);
+            target.setLayoutParams(flp);
+        });
+        final boolean[] cancelled = {false};
+        anim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationCancel(android.animation.Animator a) {
+                cancelled[0] = true;
+            }
+
+            @Override
+            public void onAnimationEnd(android.animation.Animator a) {
+                if (cancelled[0]) {
+                    return;
+                }
+                flp.width = finalWidth;
+                flp.leftMargin = endLeft;
+                flp.gravity = endGravity;
+                target.setLayoutParams(flp);
+            }
+        });
+        sBarWidthAnimator = anim;
+        anim.start();
         return true;
     }
+
 
     private static void startTabVisibilitySync(
             final android.widget.RadioGroup bar,
@@ -1476,9 +1783,15 @@ final class LiquidGlassInstaller {
             com.example.liquidglass.LiquidGlassTabBar tabBar,
             int selectedIndex) {
         try {
+            // Taken before the bar re-selects: the droplet still has the
+            // outgoing tab's width, and animateDropletTo is about to snap it
+            // to the incoming one.
+            View droplet = findDroplet(tabBar);
+            int dropletWidth = droplet == null ? 0 : droplet.getWidth();
             if (!applyTabWidths(selectedIndex)) {
                 return;
             }
+            scheduleDropletGrow(tabBar, dropletWidth);
             int width = tabBar.getMeasuredWidth();
             int height = tabBar.getMeasuredHeight();
             if (width <= 0 || height <= 0) {
@@ -1535,6 +1848,13 @@ final class LiquidGlassInstaller {
     private static void reanimateDroplet(
             final com.example.liquidglass.LiquidGlassTabBar tabBar) {
         try {
+            if (sBarWidthAnimator != null && sBarWidthAnimator.isRunning()) {
+                // every frame of that animation is a layout pass, and the bar
+                // re-syncs the droplet on layout whenever its own settle
+                // animator is idle — re-arming one here would freeze the
+                // droplet at a mid-animation target and snap at the end
+                return;
+            }
             tabBar.getViewTreeObserver().addOnGlobalLayoutListener(
                     new ViewTreeObserver.OnGlobalLayoutListener() {
                         @Override
@@ -1638,6 +1958,15 @@ final class LiquidGlassInstaller {
     private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
             new java.lang.ref.WeakReference<>(null);
     private static volatile java.lang.ref.WeakReference<View> sTabBarRef = EMPTY_BAR_REF;
+    // Width-transition state. UI thread only: every writer runs on a touch,
+    // layout, settings or postDelayed callback.
+    private static android.animation.ValueAnimator sTabShiftAnimator;
+    private static android.animation.ValueAnimator sBarWidthAnimator;
+    private static android.animation.ValueAnimator sDropletSizeAnimator;
+    private static int sBarTargetWidth = Integer.MIN_VALUE;
+    private static int sBarTargetLeft = Integer.MIN_VALUE;
+    private static int sBarTargetGravity = Integer.MIN_VALUE;
+    private static boolean sFitActive;
 
     static int dbgTintCalls() {
         return sDbgTintCalls;

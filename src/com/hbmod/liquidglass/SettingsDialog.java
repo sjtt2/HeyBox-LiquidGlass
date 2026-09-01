@@ -214,8 +214,8 @@ final class SettingsDialog {
                     }
                 }));
         box.addView(divider(act, p, den));
-        box.addView(switchRow(act, "玻璃宽度自适应",
-                "隐藏标签后底栏宽度随可见标签数收缩，选中项加长",
+        box.addView(switchRow(act, "加长选中 Tab",
+                "隐藏标签后选中项加长，底栏随可见数量收缩；建议隐藏加号后使用",
                 GlassConfig.fitVisibleTabs, p, den,
                 new OnToggle() {
                     @Override
