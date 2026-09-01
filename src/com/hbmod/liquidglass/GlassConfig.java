@@ -23,6 +23,7 @@ final class GlassConfig {
     static volatile int barOffsetDp = 16;
     /** tab item width scale, percent of the equal-split default (50-150) */
     static volatile int tabWidthPct = 100;
+    static volatile boolean fitVisibleTabs = false;
     /** bottom bar shape: 0 = auto (odd tabs -> circle), 1 = classic centered
      *  plus, 2 = circular plus button on the right */
     static volatile int barLayoutMode = 0;
@@ -55,6 +56,7 @@ final class GlassConfig {
             barHeightDp = p.getInt("barHeightDp", barHeightDp);
             barOffsetDp = p.getInt("barOffsetDp", barOffsetDp);
             tabWidthPct = p.getInt("tabWidthPct", tabWidthPct);
+            fitVisibleTabs = p.getBoolean("fitVisibleTabs", false);
             barLayoutMode = p.getInt("barLayoutMode", barLayoutMode);
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("config load failed", t);
@@ -74,6 +76,7 @@ final class GlassConfig {
             e.putInt("barHeightDp", barHeightDp);
             e.putInt("barOffsetDp", barOffsetDp);
             e.putInt("tabWidthPct", tabWidthPct);
+            e.putBoolean("fitVisibleTabs", fitVisibleTabs);
             e.putInt("barLayoutMode", barLayoutMode);
             e.apply();
         } catch (Throwable t) {
@@ -90,6 +93,7 @@ final class GlassConfig {
         barHeightDp = 0;
         barOffsetDp = 16;
         tabWidthPct = 100;
+        fitVisibleTabs = false;
         barLayoutMode = 0;
         immersiveGestureNavigation = true;
     }

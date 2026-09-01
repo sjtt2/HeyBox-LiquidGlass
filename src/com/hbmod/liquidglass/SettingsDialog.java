@@ -214,6 +214,17 @@ final class SettingsDialog {
                     }
                 }));
         box.addView(divider(act, p, den));
+        box.addView(switchRow(act, "玻璃宽度自适应",
+                "隐藏标签后底栏宽度随可见标签数收缩，选中项加长",
+                GlassConfig.fitVisibleTabs, p, den,
+                new OnToggle() {
+                    @Override
+                    public void onToggle(boolean checked) {
+                        GlassConfig.fitVisibleTabs = checked;
+                        persistAndRefresh(act);
+                    }
+                }));
+        box.addView(divider(act, p, den));
         box.addView(modeRow(act, p, den));
         return box;
     }

@@ -192,6 +192,9 @@ final class LiquidGlassInstaller {
     /** Weight of the empty center column reserved for the publish button,
      *  relative to a normal tab's weight of 1. */
     private static final float CENTER_GAP_WEIGHT = 1.3f;
+    private static final float FIT_TAB_MAX_WIDTH_DP = 96f;
+    private static final float SELECTED_TAB_WEIGHT = 1.4f;
+    private static final float OTHER_TAB_WEIGHT = 0.9f;
     /** Set true to show the on-screen diagnosis HUD (test builds). */
     private static final boolean USE_DEBUG_HUD = false;
     private static volatile boolean sTabBarActive;
@@ -427,6 +430,9 @@ final class LiquidGlassInstaller {
                         if (index == null || index < 0 || index >= visibleButtons.size()) {
                             return kotlin.Unit.INSTANCE;
                         }
+                        if (applyTabWidths(tabBar.getSelectedIndex())) {
+                            reanimateDroplet(tabBar);
+                        }
                         android.widget.RadioButton rb = visibleButtons.get(index);
                         if (rb != null && !rb.isChecked()) {
                             rb.performClick();
@@ -441,12 +447,15 @@ final class LiquidGlassInstaller {
 
             // initial selection from current checked state
             int checked = bar.getCheckedRadioButtonId();
+            int selected = 0;
             for (int i = 0; i < visibleButtons.size(); i++) {
                 if (visibleButtons.get(i).getId() == checked) {
-                    tabBar.setSelectedIndex(i);
+                    selected = i;
                     break;
                 }
             }
+            applyTabWidths(selected);
+            tabBar.setSelectedIndex(selected);
 
             // initial theme: the app resolves day/night via standard
             // values-night qualifiers, so the activity uiMode IS the truth.
@@ -865,9 +874,14 @@ final class LiquidGlassInstaller {
                     host.getPaddingRight(), sBasePadBottom
                             + Math.round(off * den));
 
-            applyTabWidths();
+            boolean tabLayoutChanged = applyTabWidths();
 
             host.requestLayout();
+            if (tabLayoutChanged
+                    && barV instanceof com.example.liquidglass.LiquidGlassTabBar) {
+                reanimateDroplet(
+                        (com.example.liquidglass.LiquidGlassTabBar) barV);
+            }
             final ViewGroup h2 = host;
             final ViewGroup b2 = (ViewGroup) barV;
             host.post(() -> placeCenterNow(h2, b2, center, 0));
@@ -882,26 +896,42 @@ final class LiquidGlassInstaller {
         }
     }
 
-    private static void applyTabWidths() {
+    private static boolean applyTabWidths() {
+        View barV = sTabBarRef.get();
+        int selected = barV instanceof com.example.liquidglass.LiquidGlassTabBar
+                ? ((com.example.liquidglass.LiquidGlassTabBar) barV).getSelectedIndex()
+                : 0;
+        return applyTabWidths(selected);
+    }
+
+    private static boolean applyTabWidths(int selectedIndex) {
+        boolean changed = false;
         try {
             View barV = sTabBarRef.get();
             if (!(barV instanceof ViewGroup)
                     || ((ViewGroup) barV).getChildCount() == 0
                     || !(((ViewGroup) barV).getChildAt(0) instanceof ViewGroup)) {
-                return;
+                return false;
             }
             ViewGroup row = (ViewGroup) ((ViewGroup) barV).getChildAt(0);
             int tabs = 0;
+            boolean hasGap = false;
             for (int i = 0; i < row.getChildCount(); i++) {
                 if (row.getChildAt(i) instanceof android.widget.LinearLayout) {
                     tabs++;
+                } else if (row.getChildAt(i) instanceof android.widget.Space) {
+                    hasGap = true;
                 }
             }
             if (tabs == 0) {
-                return;
+                return false;
             }
             float f = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
-            float gap = Math.max(0.3f, (tabs + CENTER_GAP_WEIGHT) / f - tabs);
+            boolean fit = fitVisibleTabsEffective(tabs);
+            int selected = Math.max(0, Math.min(selectedIndex, tabs - 1));
+            float gap = fit ? CENTER_GAP_WEIGHT
+                    : Math.max(0.3f, (tabs + CENTER_GAP_WEIGHT) / f - tabs);
+            int tabIndex = 0;
             for (int i = 0; i < row.getChildCount(); i++) {
                 View c = row.getChildAt(i);
                 if (!(c.getLayoutParams()
@@ -910,15 +940,84 @@ final class LiquidGlassInstaller {
                 }
                 android.widget.LinearLayout.LayoutParams lp =
                         (android.widget.LinearLayout.LayoutParams) c.getLayoutParams();
-                float w = c instanceof android.widget.Space ? gap : f;
+                float w;
+                if (c instanceof android.widget.Space) {
+                    w = gap;
+                } else if (c instanceof android.widget.LinearLayout) {
+                    w = fit
+                            ? (tabIndex == selected
+                            ? SELECTED_TAB_WEIGHT : OTHER_TAB_WEIGHT)
+                            : f;
+                    tabIndex++;
+                } else {
+                    continue;
+                }
                 if (Math.abs(lp.weight - w) > 0.001f) {
                     lp.weight = w;
                     c.setLayoutParams(lp);
+                    changed = true;
                 }
             }
+            float totalWeight = fit
+                    ? OTHER_TAB_WEIGHT * tabs
+                    + (SELECTED_TAB_WEIGHT - OTHER_TAB_WEIGHT)
+                    + (hasGap ? CENTER_GAP_WEIGHT : 0f)
+                    : 0f;
+            changed |= applyFitBarWidth(barV, totalWeight, fit, f);
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("apply tab widths failed", t);
         }
+        return changed;
+    }
+
+    private static boolean applyFitBarWidth(View barV, float totalWeight,
+            boolean fit, float widthScale) {
+        if (!(barV.getLayoutParams() instanceof FrameLayout.LayoutParams)) {
+            return false;
+        }
+        FrameLayout.LayoutParams lp =
+                (FrameLayout.LayoutParams) barV.getLayoutParams();
+        if (!fit) {
+            int gravity = android.view.Gravity.TOP
+                    | android.view.Gravity.FILL_HORIZONTAL;
+            if (lp.width == ViewGroup.LayoutParams.MATCH_PARENT
+                    && lp.gravity == gravity && lp.leftMargin == 0) {
+                return false;
+            }
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            lp.gravity = gravity;
+            lp.leftMargin = 0;
+            barV.setLayoutParams(lp);
+            return true;
+        }
+        ViewGroup host = sHostRef;
+        float den = sDensity > 0 ? sDensity
+                : barV.getResources().getDisplayMetrics().density;
+        int hostWidth = host != null ? host.getWidth() : 0;
+        if (hostWidth <= 0) {
+            hostWidth = barV.getResources().getDisplayMetrics().widthPixels
+                    - Math.round(20f * den);
+        }
+        int available = Math.max(0, hostWidth - lp.rightMargin);
+        if (available <= 0 || totalWeight <= 0f) {
+            return false;
+        }
+        int innerAvailable = Math.max(1, available - Math.round(8f * den));
+        int perWeight = Math.min(
+                Math.round(FIT_TAB_MAX_WIDTH_DP * widthScale * den),
+                Math.round(innerAvailable / totalWeight));
+        int width = Math.min(available,
+                Math.round(totalWeight * perWeight) + Math.round(8f * den));
+        int left = Math.max(0, (available - width) / 2);
+        int gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+        if (lp.width == width && lp.gravity == gravity && lp.leftMargin == left) {
+            return false;
+        }
+        lp.width = width;
+        lp.gravity = gravity;
+        lp.leftMargin = left;
+        barV.setLayoutParams(lp);
+        return true;
     }
 
     private static void startTabVisibilitySync(
@@ -1027,7 +1126,6 @@ final class LiquidGlassInstaller {
             }
             changed = true;
         }
-        applyTabWidths();
         float den = sDensity > 0 ? sDensity : 3f;
         int barH = barV.getHeight();
         int circleSize = barH > 0 ? barH : Math.round(56 * den);
@@ -1041,6 +1139,11 @@ final class LiquidGlassInstaller {
                 barV.setLayoutParams(blp);
                 changed = true;
             }
+        }
+        boolean tabLayoutChanged = applyTabWidths();
+        changed |= tabLayoutChanged;
+        if (tabLayoutChanged) {
+            reanimateDroplet(tabBar);
         }
         if (circle) {
             View glass = sGlassCircleRef == null ? null : sGlassCircleRef.get();
@@ -1115,24 +1218,54 @@ final class LiquidGlassInstaller {
     private static final String BH_PENDING_PREFS = "betterheybox_pending";
     private static final String BH_KEY_HIDE_ADD = "hide_add";
 
+    private static boolean fitVisibleTabsEffective(int visibleTabs) {
+        if (!GlassConfig.fitVisibleTabs) {
+            return false;
+        }
+        try {
+            android.widget.RadioGroup bar = sRadioBarRef.get();
+            int named = 0;
+            if (bar != null) {
+                for (int i = 0; i < bar.getChildCount(); i++) {
+                    View child = bar.getChildAt(i);
+                    if (!(child instanceof android.widget.RadioButton)) {
+                        continue;
+                    }
+                    CharSequence title = ((android.widget.RadioButton) child).getText();
+                    if (title == null || title.toString().trim().isEmpty()) {
+                        continue;
+                    }
+                    named++;
+                }
+            }
+            return visibleTabs > 0 && visibleTabs < named;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     /** Mirrors BetterHeybox's own three-tier key resolution so the two
      *  modules agree on whether the plus button is explicitly hidden. */
     private static boolean betterHeyboxHideAdd(Context context) {
+        return betterHeyboxBoolean(context, BH_KEY_HIDE_ADD);
+    }
+
+    private static boolean betterHeyboxBoolean(Context context, String key) {
         try {
             android.content.SharedPreferences pending = context
                     .getSharedPreferences(BH_PENDING_PREFS, 0);
-            if (pending != null && pending.contains(BH_KEY_HIDE_ADD)) {
-                return pending.getBoolean(BH_KEY_HIDE_ADD, false);
+            if (pending != null && pending.contains(key)) {
+                return pending.getBoolean(key, false);
             }
             android.content.SharedPreferences local = context
                     .getSharedPreferences(BH_PREFS, 0);
-            if (local != null && local.contains(BH_KEY_HIDE_ADD)) {
-                return local.getBoolean(BH_KEY_HIDE_ADD, false);
+            if (local != null && local.contains(key)) {
+                return local.getBoolean(key, false);
             }
             android.content.SharedPreferences remote =
                     HeyBoxLiquidGlassModule.remotePrefs(BH_PREFS);
             if (remote != null) {
-                return remote.getBoolean(BH_KEY_HIDE_ADD, false);
+                return remote.getBoolean(key, false);
             }
         } catch (Throwable ignored) {
         }
@@ -1245,14 +1378,16 @@ final class LiquidGlassInstaller {
         if (!sPlusHidden) {
             insertCenterGap(tabBar.getContext(), tabBar);
         }
-        applyTabWidths();
         int checked = bar.getCheckedRadioButtonId();
+        int selected = 0;
         for (int i = 0; i < now.size(); i++) {
             if (now.get(i).getId() == checked) {
-                tabBar.setSelectedIndex(i);
+                selected = i;
                 break;
             }
         }
+        applyTabWidths(selected);
+        tabBar.setSelectedIndex(selected);
         applyTabBarOverLight(tabBar, sChromeLight);
         tabBar.requestLayout();
         syncPlusButton(bar, tabBar);
@@ -1297,26 +1432,36 @@ final class LiquidGlassInstaller {
                     float dx = event.getX() - down[0];
                     float dy = event.getY() - down[1];
                     moved[0] = moved[0] || dx * dx + dy * dy > slop * slop;
-                } else if (action == android.view.MotionEvent.ACTION_UP && !moved[0]) {
-                    final int target = findTabIndexAt(tabBar, event.getX());
-                    final int before = selectedBefore[0];
-                    tabBar.post(() -> {
-                        try {
-                            if (target != before || target != tabBar.getSelectedIndex()
-                                    || target < 0 || target >= buttons.size()
-                                    || target >= repeatRefreshTabs.size()
-                                    || !Boolean.TRUE.equals(repeatRefreshTabs.get(target))) {
-                                return;
-                            }
-                            android.widget.RadioButton button = buttons.get(target);
-                            if (button != null) {
-                                button.performClick();
-                            }
-                        } catch (Throwable t) {
-                            HeyBoxLiquidGlassModule.logErr(
-                                    "repeat tab refresh failed", t);
+                } else if (action == android.view.MotionEvent.ACTION_UP) {
+                    if (moved[0]) {
+                        int near = nearestTabIndex(tabBar);
+                        if (near >= 0) {
+                            prepareSelectionLayout(tabBar, near);
                         }
-                    });
+                    } else {
+                        int target = findTabIndexAt(tabBar, event.getX());
+                        if (target >= 0) {
+                            prepareSelectionLayout(tabBar, target);
+                        }
+                        final int before = selectedBefore[0];
+                        tabBar.post(() -> {
+                            try {
+                                if (target != before || target != tabBar.getSelectedIndex()
+                                        || target < 0 || target >= buttons.size()
+                                        || target >= repeatRefreshTabs.size()
+                                        || !Boolean.TRUE.equals(repeatRefreshTabs.get(target))) {
+                                    return;
+                                }
+                                android.widget.RadioButton button = buttons.get(target);
+                                if (button != null) {
+                                    button.performClick();
+                                }
+                            } catch (Throwable t) {
+                                HeyBoxLiquidGlassModule.logErr(
+                                        "repeat tab refresh failed", t);
+                            }
+                        });
+                    }
                 } else if (action == android.view.MotionEvent.ACTION_CANCEL) {
                     moved[0] = false;
                 }
@@ -1325,6 +1470,85 @@ final class LiquidGlassInstaller {
             }
             return false;
         });
+    }
+
+    private static void prepareSelectionLayout(
+            com.example.liquidglass.LiquidGlassTabBar tabBar,
+            int selectedIndex) {
+        try {
+            if (!applyTabWidths(selectedIndex)) {
+                return;
+            }
+            int width = tabBar.getMeasuredWidth();
+            int height = tabBar.getMeasuredHeight();
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+            int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                    width, View.MeasureSpec.EXACTLY);
+            int heightSpec = View.MeasureSpec.makeMeasureSpec(
+                    height, View.MeasureSpec.EXACTLY);
+            tabBar.measure(widthSpec, heightSpec);
+            tabBar.layout(tabBar.getLeft(), tabBar.getTop(),
+                    tabBar.getRight(), tabBar.getBottom());
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("tab selection layout failed", t);
+        }
+    }
+
+    private static int nearestTabIndex(
+            com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        try {
+            if (tabBar.getChildCount() <= 0
+                    || !(tabBar.getChildAt(0) instanceof android.widget.LinearLayout)) {
+                return -1;
+            }
+            View droplet = findDroplet(tabBar);
+            if (droplet == null) {
+                return -1;
+            }
+            float centerX = droplet.getX() + droplet.getWidth() / 2f;
+            int best = tabBar.getSelectedIndex();
+            float bestDistance = Float.MAX_VALUE;
+            int index = 0;
+            android.widget.LinearLayout row =
+                    (android.widget.LinearLayout) tabBar.getChildAt(0);
+            for (int i = 0; i < row.getChildCount(); i++) {
+                View child = row.getChildAt(i);
+                if (!(child instanceof android.widget.LinearLayout)) {
+                    continue;
+                }
+                float tabCenter = child.getLeft() + child.getWidth() / 2f;
+                float distance = Math.abs(tabCenter - centerX);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = index;
+                }
+                index++;
+            }
+            return best;
+        } catch (Throwable ignored) {
+            return -1;
+        }
+    }
+
+    private static void reanimateDroplet(
+            final com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        try {
+            tabBar.getViewTreeObserver().addOnGlobalLayoutListener(
+                    new ViewTreeObserver.OnGlobalLayoutListener() {
+                        @Override
+                        public void onGlobalLayout() {
+                            tabBar.getViewTreeObserver()
+                                    .removeOnGlobalLayoutListener(this);
+                            try {
+                                tabBar.setSelectedIndex(tabBar.getSelectedIndex());
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+        } catch (Throwable ignored) {
+        }
     }
 
     private static int findTabIndexAt(
@@ -1368,6 +1592,7 @@ final class LiquidGlassInstaller {
                         for (int i = 0; i < order.size(); i++) {
                             if (order.get(i).getId() == checkedId
                                     && tabBar.getSelectedIndex() != i) {
+                                prepareSelectionLayout(tabBar, i);
                                 tabBar.setSelectedIndex(i);
                                 break;
                             }

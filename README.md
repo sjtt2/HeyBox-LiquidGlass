@@ -13,7 +13,7 @@
 - 🌗 **深浅色跟随**：读取应用真实主题（uiMode）设定前景黑白，运行时再由背景亮度感知实时微调
 - ⚙️ **内置设置**：设置 → 长按「通用设置」打开液态玻璃配置（暗/亮底色与不透明度、反色开关、恢复默认）
 - 📣 **通知避让**：「已推荐N条新内容」提示条与底部通知自动抬升到玻璃栏上方，高度实时跟随栏顶位置
-- 🔀 **Tab 宽度调节 + 模块联动**：设置内调节 tab 宽度（50%–150%）；自动适配 [BetterHeybox](https://github.com/Mrmiaomrzh/BetterHeybox) 的隐藏底栏 tab，隐藏后玻璃栏实时重排等分
+- 🔀 **Tab 宽度调节 + 模块联动**：设置内调节 tab 宽度（50%–150%）；自动适配 [BetterHeybox](https://github.com/Mrmiaomrzh/BetterHeybox) 的隐藏底栏 tab，可选让玻璃栏随可见数量收缩并加长选中项
 - ♿ **降级兜底**：Android 13 以下自动退化为轻磨砂管线，渲染器异常不崩溃
 
 ## 📦 安装
@@ -68,6 +68,8 @@ Hook Instrumentation.callActivityOnResume
 | 折射强度 / 边缘带 | `attachQwea0TabBar()` | 60dp / 16dp |
 | 色散强度 | 同上 | 0.12 |
 | 中央空隙宽度 | `CENTER_GAP_WEIGHT` | 1.3 |
+| 自适应单项宽度上限 | `FIT_TAB_MAX_WIDTH_DP` | 96dp |
+| 自适应选中 / 未选中权重 | `SELECTED_TAB_WEIGHT` / `OTHER_TAB_WEIGHT` | 1.4 / 0.9 |
 | 主题探测方式 | uiMode（跟随应用与系统） | — |
 
 ## ⚠️ 已知限制
