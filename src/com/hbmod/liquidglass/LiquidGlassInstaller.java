@@ -385,8 +385,6 @@ final class LiquidGlassInstaller {
                     new java.util.ArrayList<>();
             final java.util.List<android.widget.RadioButton> visibleButtons =
                     new java.util.ArrayList<>();
-            final java.util.List<Boolean> repeatRefreshTabs =
-                    new java.util.ArrayList<>();
             for (int i = 0; i < bar.getChildCount(); i++) {
                 View child = bar.getChildAt(i);
                 if (child instanceof android.widget.RadioButton
@@ -400,7 +398,6 @@ final class LiquidGlassInstaller {
                     items.add(new com.example.liquidglass.LiquidGlassTabBar.TabItem(
                             title, icon));
                     visibleButtons.add(rb);
-                    repeatRefreshTabs.add(isRepeatRefreshTab(title));
                 }
             }
             if (items.isEmpty()) {
@@ -449,7 +446,7 @@ final class LiquidGlassInstaller {
                     return kotlin.Unit.INSTANCE;
                 }
             });
-            installRepeatClickRefresh(tabBar, visibleButtons, repeatRefreshTabs);
+            installRepeatClickRefresh(tabBar, visibleButtons);
 
             // initial selection from current checked state
             int checked = bar.getCheckedRadioButtonId();
@@ -650,7 +647,7 @@ final class LiquidGlassInstaller {
 
             // app -> bar: extend the existing checked-listener wrapper
             setupTabSelectionSync(bar, tabBar, visibleButtons);
-            startTabVisibilitySync(bar, tabBar, visibleButtons, repeatRefreshTabs);
+            startTabVisibilitySync(bar, tabBar, visibleButtons);
 
             // uiMode push seeds the initial state only; after the luminance
             // meter warms up it owns chrome colors (per-backdrop adaptation).
@@ -1330,14 +1327,13 @@ final class LiquidGlassInstaller {
     private static void startTabVisibilitySync(
             final android.widget.RadioGroup bar,
             final com.example.liquidglass.LiquidGlassTabBar tabBar,
-            final java.util.List<android.widget.RadioButton> buttons,
-            final java.util.List<Boolean> refreshFlags) {
+            final java.util.List<android.widget.RadioButton> buttons) {
         bar.postDelayed(new Runnable() {
             @Override
             public void run() {
                 try {
                     boolean changed = bar.isAttachedToWindow()
-                            && syncTabSet(bar, tabBar, buttons, refreshFlags);
+                            && syncTabSet(bar, tabBar, buttons);
                     if (bar.isAttachedToWindow()
                             && syncPlusButton(bar, tabBar) && !changed) {
                         HeyBoxLiquidGlassModule.log(android.util.Log.INFO,
@@ -1633,8 +1629,7 @@ final class LiquidGlassInstaller {
 
     private static boolean syncTabSet(android.widget.RadioGroup bar,
             com.example.liquidglass.LiquidGlassTabBar tabBar,
-            java.util.List<android.widget.RadioButton> buttons,
-            java.util.List<Boolean> refreshFlags) {
+            java.util.List<android.widget.RadioButton> buttons) {
         java.util.List<android.widget.RadioButton> now = new java.util.ArrayList<>();
         for (int i = 0; i < bar.getChildCount(); i++) {
             View c = bar.getChildAt(i);
@@ -1666,7 +1661,6 @@ final class LiquidGlassInstaller {
         }
         java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
                 new java.util.ArrayList<>();
-        java.util.List<Boolean> refresh = new java.util.ArrayList<>();
         for (android.widget.RadioButton rb : now) {
             CharSequence title = rb.getText();
             Drawable icon = rb.getCompoundDrawables()[1];
@@ -1675,12 +1669,9 @@ final class LiquidGlassInstaller {
             }
             items.add(new com.example.liquidglass.LiquidGlassTabBar.TabItem(
                     title, icon));
-            refresh.add(isRepeatRefreshTab(title));
         }
         buttons.clear();
         buttons.addAll(now);
-        refreshFlags.clear();
-        refreshFlags.addAll(refresh);
         tabBar.setTabs(items);
         if (!sPlusHidden) {
             insertCenterGap(tabBar.getContext(), tabBar);
@@ -1707,19 +1698,10 @@ final class LiquidGlassInstaller {
         return true;
     }
 
-    private static boolean isRepeatRefreshTab(CharSequence title) {
-        if (title == null) {
-            return false;
-        }
-        String value = title.toString().trim();
-        return "首页".equals(value) || "热点".equals(value) || "游戏库".equals(value);
-    }
-
     private static void installRepeatClickRefresh(
             final com.example.liquidglass.LiquidGlassTabBar tabBar,
-            final java.util.List<android.widget.RadioButton> buttons,
-            final java.util.List<Boolean> repeatRefreshTabs) {
-        if (tabBar == null || buttons == null || repeatRefreshTabs == null) {
+            final java.util.List<android.widget.RadioButton> buttons) {
+        if (tabBar == null || buttons == null) {
             return;
         }
         final float[] down = new float[2];
@@ -1753,10 +1735,13 @@ final class LiquidGlassInstaller {
                         final int before = selectedBefore[0];
                         tabBar.post(() -> {
                             try {
+                                // Forward the tap the glass bar swallowed and
+                                // let the app decide what a re-tap means: the
+                                // old-style layout renames its tabs, so any
+                                // title whitelist here silently drops refresh
+                                // on whichever skin it was not written for.
                                 if (target != before || target != tabBar.getSelectedIndex()
-                                        || target < 0 || target >= buttons.size()
-                                        || target >= repeatRefreshTabs.size()
-                                        || !Boolean.TRUE.equals(repeatRefreshTabs.get(target))) {
+                                        || target < 0 || target >= buttons.size()) {
                                     return;
                                 }
                                 android.widget.RadioButton button = buttons.get(target);

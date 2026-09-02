@@ -9,8 +9,19 @@ final class InWindowTipWatcher {
 
     private static final String TIP_ID_NAME = "vg_update_tips";
     private static final long SCAN_INTERVAL_MS = 2000L;
-    private static volatile boolean sStarted;
+    private static final java.lang.ref.WeakReference<View> EMPTY_DECOR_REF =
+            new java.lang.ref.WeakReference<>(null);
+    /** Decor the scan loop is currently bound to, so a re-created activity
+     *  gets its own loop instead of inheriting a dead one. */
+    private static volatile java.lang.ref.WeakReference<View> sWatchedDecor =
+            EMPTY_DECOR_REF;
     private static volatile int sTipId;
+    private static final java.lang.ref.WeakReference<View> EMPTY_TIP_REF =
+            new java.lang.ref.WeakReference<>(null);
+    /** Last tip handed to {@link #watch}, so the per-layout fast path costs a
+     *  reference check rather than a tree walk once one is being watched. */
+    private static volatile java.lang.ref.WeakReference<View> sTipRef =
+            EMPTY_TIP_REF;
     private static final java.util.Map<View, Boolean> sWatched =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, Boolean>());
 
@@ -18,11 +29,19 @@ final class InWindowTipWatcher {
     }
 
     static void start(Activity activity) {
-        if (sStarted || activity == null) {
+        if (activity == null) {
             return;
         }
-        sStarted = true;
         try {
+            final View decor = activity.getWindow().getDecorView();
+            // Bind to the decor rather than latching a process-wide flag: the
+            // scan loop stops itself once its activity is destroyed, so a flag
+            // that never clears leaves every later activity unwatched for as
+            // long as the process outlives the first one.
+            if (decor == null || sWatchedDecor.get() == decor) {
+                return;
+            }
+            sWatchedDecor = new java.lang.ref.WeakReference<>(decor);
             sTipId = activity.getResources().getIdentifier(
                     TIP_ID_NAME, "id", activity.getPackageName());
             if (sTipId == 0) {
@@ -30,7 +49,40 @@ final class InWindowTipWatcher {
                         "in-window tip id not found: " + TIP_ID_NAME);
                 return;
             }
-            final View decor = activity.getWindow().getDecorView();
+            sTipRef = EMPTY_TIP_REF;
+            // Discovery rides the layout pass instead of a timer. A tip that
+            // appears between two ticks would otherwise be drawn at its
+            // natural position first and only jump above the bar on the next
+            // scan. onGlobalLayout runs after layout and before the pre-draw
+            // listener that applies the lift, so a tip picked up here is
+            // already lifted in the very frame it becomes visible.
+            scan(decor);
+            decor.getViewTreeObserver().addOnGlobalLayoutListener(
+                    new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                        @Override
+                        public void onGlobalLayout() {
+                            try {
+                                if (activity.isFinishing()
+                                        || activity.isDestroyed()) {
+                                    android.view.ViewTreeObserver vto =
+                                            decor.getViewTreeObserver();
+                                    if (vto != null && vto.isAlive()) {
+                                        vto.removeOnGlobalLayoutListener(this);
+                                    }
+                                    return;
+                                }
+                                View known = sTipRef.get();
+                                if (known != null && known.isAttachedToWindow()) {
+                                    return;
+                                }
+                                scan(decor);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+            // Slow sweep kept as a safety net: the fast path above stops
+            // walking the tree once it has a live tip, so a second one added
+            // later is picked up here instead.
             decor.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -65,6 +117,7 @@ final class InWindowTipWatcher {
     }
 
     private static void watch(final View tip) {
+        sTipRef = new java.lang.ref.WeakReference<>(tip);
         if (sWatched.put(tip, Boolean.TRUE) != null) {
             return;
         }
