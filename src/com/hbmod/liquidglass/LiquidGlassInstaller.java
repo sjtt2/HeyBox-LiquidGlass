@@ -501,6 +501,11 @@ final class LiquidGlassInstaller {
                 center.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        // same pop the selected tab's icon gets, so the
+                        // plus reacts to its own tap instead of sitting still
+                        if (host instanceof LiquidGlassHostLayout) {
+                            ((LiquidGlassHostLayout) host).popChild(midTab);
+                        }
                         midTab.performClick();
                     }
                 });
@@ -805,6 +810,12 @@ final class LiquidGlassInstaller {
                 return;
             }
             int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
+            if (sCenterAnimator != null && sCenterAnimator.isRunning()
+                    && left == sCenterTargetLeft) {
+                // already gliding to this exact spot; snapping here would
+                // jump the plus ahead of the tabs mid-transition
+                return;
+            }
             if (center.getWidth() == spacer.getWidth()
                     && center.getHeight() == tabBar.getHeight()
                     && center.getLeft() == left
@@ -1893,8 +1904,86 @@ final class LiquidGlassInstaller {
             tabBar.measure(widthSpec, heightSpec);
             tabBar.layout(tabBar.getLeft(), tabBar.getTop(),
                     tabBar.getRight(), tabBar.getBottom());
+            glideCenterTo(tabBar);
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("tab selection layout failed", t);
+        }
+    }
+
+    /** Selection changes re-distribute the tab weights immediately (the
+     *  labels glide via translationX on top of that), which moves the centre
+     *  gap. The plus used to wait for the 500ms visibility poll to
+     *  placeCenterNow, reading as a stall followed by a snap. Glide it on the
+     *  same 380ms beat as the labels instead. */
+    private static void glideCenterTo(
+            com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        try {
+            View center = sCenterRefStatic;
+            if (center == null
+                    || !(center.getLayoutParams()
+                            instanceof FrameLayout.LayoutParams)) {
+                return;
+            }
+            if (sPlusHidden || sCircleMode
+                    || center.getVisibility() != View.VISIBLE) {
+                return;
+            }
+            View row = tabBar.getChildAt(0);
+            if (!(row instanceof android.widget.LinearLayout)) {
+                return;
+            }
+            android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
+            int n = ll.getChildCount();
+            if (n < 3) {
+                return;
+            }
+            View spacer = ll.getChildAt(n / 2);
+            if (spacer.getWidth() <= 0) {
+                return;
+            }
+            int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
+            final FrameLayout.LayoutParams lp =
+                    (FrameLayout.LayoutParams) center.getLayoutParams();
+            if (left == lp.leftMargin) {
+                return;
+            }
+            if (sCenterAnimator != null) {
+                sCenterAnimator.cancel();
+            }
+            sCenterTargetLeft = left;
+            final int from = lp.leftMargin;
+            final int to = left;
+            android.animation.ValueAnimator anim =
+                    android.animation.ValueAnimator.ofFloat(0f, 1f);
+            anim.setDuration(FIT_ANIM_MS);
+            anim.setInterpolator(
+                    new android.view.animation.OvershootInterpolator(
+                            FIT_ANIM_TENSION));
+            anim.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                lp.leftMargin = Math.round(from + (to - from) * t);
+                center.setLayoutParams(lp);
+            });
+            final boolean[] cancelled = {false};
+            anim.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationCancel(android.animation.Animator a) {
+                    cancelled[0] = true;
+                }
+
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    if (cancelled[0]) {
+                        return;
+                    }
+                    lp.leftMargin = to;
+                    center.setLayoutParams(lp);
+                }
+            });
+            sCenterAnimator = anim;
+            anim.start();
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("center glide failed", t);
         }
     }
 
@@ -2059,6 +2148,8 @@ final class LiquidGlassInstaller {
     /** Settings-driven geometry changes land instantly: a slider tick would
      *  otherwise queue a 380ms transition per drag step and lag the finger. */
     private static boolean sSnapWidthChanges;
+    private static android.animation.ValueAnimator sCenterAnimator;
+    private static int sCenterTargetLeft = Integer.MIN_VALUE;
 
     static int dbgTintCalls() {
         return sDbgTintCalls;

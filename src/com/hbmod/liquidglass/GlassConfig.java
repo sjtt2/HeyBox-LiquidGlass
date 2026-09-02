@@ -23,7 +23,7 @@ final class GlassConfig {
     static volatile int barOffsetDp = 16;
     /** glass pill width mode: 0 = auto (size to tab content, centred),
      *  1 = full width edge to edge, 2 = custom percent (barWidthPct) */
-    static volatile int barWidthMode = 1;
+    static volatile int barWidthMode = 0;
     /** glass pill width in custom mode, percent of the full parent width
      *  (50-100); 100 means edge to edge */
     static volatile int barWidthPct = 100;
@@ -102,7 +102,7 @@ final class GlassConfig {
         adaptiveChrome = true;
         barHeightDp = 0;
         barOffsetDp = 16;
-        barWidthMode = 1;
+        barWidthMode = 0;
         barWidthPct = 100;
         tabWidthPct = 100;
         fitVisibleTabs = false;
