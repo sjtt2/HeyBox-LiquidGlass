@@ -112,6 +112,7 @@ final class LiquidGlassInstaller {
                 : root.getChildCount();
         root.addView(host, insertAt, hostLp);
         sHostRef = host;
+        applyBarSideMargins(host);
 
         FrameLayout.LayoutParams barFlp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -851,8 +852,88 @@ final class LiquidGlassInstaller {
         }
     }
 
+    /** Sets the pill width through symmetric side margins on its host:
+     *  full mode goes edge to edge, custom mode takes a percent of the
+     *  parent, auto mode sizes to the tab content so a wide screen gets a
+     *  centred bar instead of one stretched across it. Tabs need no separate
+     *  handling, they are weight-distributed across whatever width remains. */
+    private static void applyBarSideMargins(ViewGroup host) {
+        try {
+            if (!(host.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
+                return;
+            }
+            RelativeLayout.LayoutParams lp =
+                    (RelativeLayout.LayoutParams) host.getLayoutParams();
+            View parent = host.getParent() instanceof View
+                    ? (View) host.getParent() : null;
+            int parentWidth = parent != null ? parent.getWidth() : 0;
+            if (parentWidth <= 0) {
+                parentWidth = host.getResources()
+                        .getDisplayMetrics().widthPixels;
+            }
+            if (parentWidth <= 0) {
+                return;
+            }
+            int target;
+            switch (GlassConfig.barWidthMode) {
+                case 0:
+                    target = adaptiveBarWidth(host, parentWidth);
+                    break;
+                case 2:
+                    int pct = Math.max(50,
+                            Math.min(GlassConfig.barWidthPct, 100));
+                    target = Math.round(parentWidth * pct / 100f);
+                    break;
+                default:
+                    target = parentWidth;
+                    break;
+            }
+            int margin = Math.max(0, (parentWidth - target) / 2);
+            if (lp.leftMargin == margin && lp.rightMargin == margin) {
+                return;
+            }
+            lp.leftMargin = margin;
+            lp.rightMargin = margin;
+            host.setLayoutParams(lp);
+        } catch (Throwable t) {
+            HeyBoxLiquidGlassModule.logErr("apply bar side margins failed", t);
+        }
+    }
+
+    /** Content width for auto mode: every tab up to the same 96dp ceiling the
+     *  adaptive tab sizing uses, plus the centre gap when the plus button
+     *  occupies one. Capped at the parent so a phone stays full width. */
+    private static int adaptiveBarWidth(View host, int parentWidth) {
+        float den = sDensity > 0 ? sDensity
+                : host.getResources().getDisplayMetrics().density;
+        float scale = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150))
+                / 100f;
+        android.widget.RadioGroup radio = sRadioBarRef.get();
+        int tabs = 0;
+        if (radio != null) {
+            for (int i = 0; i < radio.getChildCount(); i++) {
+                View c = radio.getChildAt(i);
+                if (c instanceof android.widget.RadioButton
+                        && c.getVisibility() == View.VISIBLE) {
+                    tabs++;
+                }
+            }
+        }
+        if (tabs == 0) {
+            return parentWidth;
+        }
+        float perTab = FIT_TAB_MAX_WIDTH_DP * den * scale;
+        float w = tabs * perTab + Math.round(8f * den);
+        if (!sCircleMode && !sPlusHidden) {
+            w += CENTER_GAP_WEIGHT * perTab;
+        }
+        return Math.min(parentWidth, Math.round(w));
+    }
+
     /** Applies user height/offset config to the live bar (settings dialog). */
-    static void applyBarGeometry() {        try {
+    static void applyBarGeometry() {
+        sSnapWidthChanges = true;
+        try {
             View barV = sTabBarRef.get();
             ViewGroup host = sHostRef;
             View center = sCenterRefStatic;
@@ -877,6 +958,7 @@ final class LiquidGlassInstaller {
                     host.getPaddingRight(), sBasePadBottom
                             + Math.round(off * den));
 
+            applyBarSideMargins(host);
             boolean tabLayoutChanged = applyTabWidths();
 
             host.requestLayout();
@@ -887,7 +969,18 @@ final class LiquidGlassInstaller {
             }
             final ViewGroup h2 = host;
             final ViewGroup b2 = (ViewGroup) barV;
-            host.post(() -> placeCenterNow(h2, b2, center, 0));
+            host.post(() -> {
+                // the host width only reflects the new margins after layout,
+                // and the fit-mode bar width is derived from it. This runs
+                // after the finally below, so it has to re-assert the snap.
+                sSnapWidthChanges = true;
+                try {
+                    applyTabWidths();
+                } finally {
+                    sSnapWidthChanges = false;
+                }
+                placeCenterNow(h2, b2, center, 0);
+            });
             android.widget.RadioGroup radio = sRadioBarRef.get();
             if (radio != null
                     && barV instanceof com.example.liquidglass.LiquidGlassTabBar) {
@@ -896,6 +989,8 @@ final class LiquidGlassInstaller {
             }
         } catch (Throwable t) {
             HeyBoxLiquidGlassModule.logErr("applyBarGeometry failed", t);
+        } finally {
+            sSnapWidthChanges = false;
         }
     }
 
@@ -1146,6 +1241,9 @@ final class LiquidGlassInstaller {
             if (before == null || row.getChildCount() != before.length) {
                 return;
             }
+            if (sSnapWidthChanges) {
+                return;
+            }
             if (sBarWidthAnimator != null && sBarWidthAnimator.isRunning()) {
                 // the pill is already animating its own real layout; the tabs
                 // ride along with it and must not be offset on top of that
@@ -1273,7 +1371,8 @@ final class LiquidGlassInstaller {
         if (animating) {
             sBarWidthAnimator.cancel();
         }
-        if (startWidth <= 0 || endPx <= 0 || startWidth == endPx) {
+        if (sSnapWidthChanges || startWidth <= 0 || endPx <= 0
+                || startWidth == endPx) {
             lp.width = width;
             lp.leftMargin = left;
             lp.gravity = gravity;
@@ -1405,6 +1504,11 @@ final class LiquidGlassInstaller {
             }
         }
         sPlusHidden = wantHidden;
+        // auto width depends on the visible tab count and the plus-button
+        // flags just computed, and this runs from the 500ms visibility poll
+        // where nothing else would re-derive the margins. No-op (early
+        // return) in the fixed modes unless the screen rotated.
+        applyBarSideMargins(host);
         if (tabBar.getChildCount() == 0
                 || !(tabBar.getChildAt(0) instanceof ViewGroup)) {
             return true;
@@ -1952,6 +2056,9 @@ final class LiquidGlassInstaller {
     private static int sBarTargetLeft = Integer.MIN_VALUE;
     private static int sBarTargetGravity = Integer.MIN_VALUE;
     private static boolean sFitActive;
+    /** Settings-driven geometry changes land instantly: a slider tick would
+     *  otherwise queue a 380ms transition per drag step and lag the finger. */
+    private static boolean sSnapWidthChanges;
 
     static int dbgTintCalls() {
         return sDbgTintCalls;

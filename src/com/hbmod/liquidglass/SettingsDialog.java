@@ -190,6 +190,34 @@ final class SettingsDialog {
                     }
                 }));
         box.addView(divider(act, p, den));
+        final View widthDivider = divider(act, p, den);
+        final View widthSlider = sliderRow(act, "玻璃条宽度",
+                GlassConfig.barWidthPct + "%", 50,
+                Math.max(0, Math.min(GlassConfig.barWidthPct - 50, 50)),
+                50, p, den, new OnSlide() {
+                    @Override
+                    public String onSlide(int progress) {
+                        GlassConfig.barWidthPct = progress + 50;
+                        persistAndRefresh(act);
+                        return GlassConfig.barWidthPct + "%";
+                    }
+                });
+        box.addView(widthModeRow(act, p, den, new Runnable() {
+            @Override
+            public void run() {
+                boolean custom = GlassConfig.barWidthMode == 2;
+                widthDivider.setVisibility(
+                        custom ? View.VISIBLE : View.GONE);
+                widthSlider.setVisibility(
+                        custom ? View.VISIBLE : View.GONE);
+            }
+        }));
+        box.addView(widthDivider);
+        box.addView(widthSlider);
+        widthDivider.setVisibility(
+                GlassConfig.barWidthMode == 2 ? View.VISIBLE : View.GONE);
+        widthSlider.setVisibility(
+                GlassConfig.barWidthMode == 2 ? View.VISIBLE : View.GONE);
         box.addView(sliderRow(act, "距屏幕底部",
                 GlassConfig.barOffsetDp + "dp", 40,
                 Math.max(0, Math.min(GlassConfig.barOffsetDp, 40)),
@@ -358,6 +386,68 @@ final class SettingsDialog {
 
     private interface OnSlide {
         String onSlide(int progress);
+    }
+
+    private static final int[] WIDTH_MODE_VALUES = {0, 1, 2};
+
+    private static View widthModeRow(final Activity act, final Palette p,
+                                     final float den, final Runnable onPick) {
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(den, 16), dp(den, 14), dp(den, 16), dp(den, 14));
+        TextView label = new TextView(act);
+        label.setText("玻璃条宽度");
+        label.setTextSize(15f);
+        label.setTextColor(p.textPrimary);
+        row.addView(label);
+        LinearLayout chips = new LinearLayout(act);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, dp(den, 10), 0, 0);
+        final String[] names = {"自适应", "占满", "自定义"};
+        for (int i = 0; i < names.length; i++) {
+            final int idx = i;
+            TextView chip = new TextView(act);
+            chip.setText(names[i]);
+            chip.setTextSize(13f);
+            chip.setTextColor(p.textPrimary);
+            chip.setPadding(dp(den, 12), dp(den, 6), dp(den, 12), dp(den, 6));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            cp.rightMargin = dp(den, 8);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    GlassConfig.barWidthMode = WIDTH_MODE_VALUES[idx];
+                    persistAndRefresh(act);
+                    markWidthModes(chips, p, den);
+                    onPick.run();
+                }
+            });
+            chips.addView(chip, cp);
+        }
+        markWidthModes(chips, p, den);
+        row.addView(chips);
+        TextView hint = new TextView(act);
+        hint.setText("自适应：按标签数量取合适宽度并居中；自定义时可用下方滑杆");
+        hint.setTextSize(12f);
+        hint.setTextColor(p.textSecondary);
+        hint.setPadding(0, dp(den, 6), 0, 0);
+        row.addView(hint);
+        return row;
+    }
+
+    private static void markWidthModes(LinearLayout chips, Palette p, float den) {
+        for (int i = 0; i < chips.getChildCount(); i++) {
+            View c = chips.getChildAt(i);
+            GradientDrawable gd = new GradientDrawable();
+            gd.setCornerRadius(dp(den, 14));
+            boolean selected = WIDTH_MODE_VALUES[i] == GlassConfig.barWidthMode;
+            gd.setColor(selected ? (p.night ? 0x334A93FF : 0x142B7FFF)
+                    : Color.TRANSPARENT);
+            gd.setStroke(dp(den, 1), selected ? p.accent : p.hairline);
+            c.setBackground(gd);
+        }
     }
 
     private static View switchRow(Context ctx, String title, String subtitle,

@@ -21,6 +21,12 @@ final class GlassConfig {
     static volatile int barHeightDp = 0;
     /** extra distance between the glass pill and the screen bottom, dp */
     static volatile int barOffsetDp = 16;
+    /** glass pill width mode: 0 = auto (size to tab content, centred),
+     *  1 = full width edge to edge, 2 = custom percent (barWidthPct) */
+    static volatile int barWidthMode = 1;
+    /** glass pill width in custom mode, percent of the full parent width
+     *  (50-100); 100 means edge to edge */
+    static volatile int barWidthPct = 100;
     /** tab item width scale, percent of the equal-split default (50-150) */
     static volatile int tabWidthPct = 100;
     static volatile boolean fitVisibleTabs = false;
@@ -55,6 +61,8 @@ final class GlassConfig {
             adaptiveChrome = p.getBoolean("adaptiveChrome", true);
             barHeightDp = p.getInt("barHeightDp", barHeightDp);
             barOffsetDp = p.getInt("barOffsetDp", barOffsetDp);
+            barWidthMode = p.getInt("barWidthMode", barWidthMode);
+            barWidthPct = p.getInt("barWidthPct", barWidthPct);
             tabWidthPct = p.getInt("tabWidthPct", tabWidthPct);
             fitVisibleTabs = p.getBoolean("fitVisibleTabs", false);
             barLayoutMode = p.getInt("barLayoutMode", barLayoutMode);
@@ -75,6 +83,8 @@ final class GlassConfig {
             e.putBoolean("adaptiveChrome", adaptiveChrome);
             e.putInt("barHeightDp", barHeightDp);
             e.putInt("barOffsetDp", barOffsetDp);
+            e.putInt("barWidthMode", barWidthMode);
+            e.putInt("barWidthPct", barWidthPct);
             e.putInt("tabWidthPct", tabWidthPct);
             e.putBoolean("fitVisibleTabs", fitVisibleTabs);
             e.putInt("barLayoutMode", barLayoutMode);
@@ -92,6 +102,8 @@ final class GlassConfig {
         adaptiveChrome = true;
         barHeightDp = 0;
         barOffsetDp = 16;
+        barWidthMode = 1;
+        barWidthPct = 100;
         tabWidthPct = 100;
         fitVisibleTabs = false;
         barLayoutMode = 0;
